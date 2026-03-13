@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Price Guard
 
-## Getting Started
+Intelligent AP Pricing & Monitoring. Automatically scan invoices via AI OCR, detect pricing leakage, and trigger credit memos in one click.
 
-First, run the development server:
+## Out-of-the-Box Experience (Mock Mode)
+
+By default, **Price Guard runs perfectly out-of-the-box without any external services.**
+
+If no API keys are provided, the application relies on an **In-Memory Service Layer**:
+- **OCR Uploads:** Uploading any image will simulate a 1.5s extraction delay and return a structured mock invoice.
+- **Database:** Approved, pending, and dismissed credit memos are stored in RAM. They will reset when the server restarts.
+- **Emails:** Clicking "Approve & Send" logs the email body to your server console instead of actually emailing the vendor.
+
+To run the app in Mock Mode right now:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) to see it in action.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Then visit [http://localhost:3000/setup](http://localhost:3000/setup) (or click **⚙ Setup** in the top-right corner of the dashboard) to launch the **Setup Wizard** — a guided, in-app configuration tool that walks you through connecting your own API keys.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## Production Setup (Real Backends)
 
-To learn more about Next.js, take a look at the following resources:
+Price Guard is fully configured to use real external SDKs automatically if the correct environment variables are provided.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 1. Configure `.env.local`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Create a `.env.local` file in the root of the project to activate the real services:
 
-## Deploy on Vercel
+```env
+# 1. Real AI OCR Extraction (OpenAI Vision)
+# Requires a funded OpenAI account
+OPENAI_API_KEY=sk-your-openai-key-here
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+# 2. Real Email Dispatching (Resend)
+# Creates real email drafts sent to vendors
+RESEND_API_KEY=re_your_resend_key_here
+FROM_EMAIL=accounts@your-domain.com 
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# 3. Real Database Persistence (Supabase PostgreSQL)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+# Use the Service Role Key so the server can bypass RLS for now
+SUPABASE_SERVICE_ROLE_KEY=ey...
+```
+
+### 2. Setup Supabase Database
+
+If you provided the Supabase URLs above, you must initialize the database tables.
+
+Copy the SQL from `supabase-schema.sql` (found in the root directory) and execute it in your Supabase project's SQL Editor to create the `vendors`, `invoices`, `product_pricing`, and `credit_memos` tables.
+
+### 3. Run Production Server
+
+Once configured, restart the Next.js server. The `src/lib/services.ts` locator will instantly transition the app from the In-Memory mock repositories to the real, stateful Supabase/OpenAI/Resend implementations.
