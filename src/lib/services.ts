@@ -9,45 +9,98 @@ import {
 import { AntigravityOCRClient } from "./ocr";
 
 // -------------------------------------------------------------
-// IN-MEMORY / MOCK IMPLEMENTATIONS
+// Service Layer — Dependency Injection Container
+// 
+// Priority:
+//  1. Supabase (cloud) — if SUPABASE env vars are present
+//  2. SQLite (local)   — default, zero-config
+//
+// The app works out of the box with SQLite. No accounts or
+// API keys are needed. Supabase is an optional cloud upgrade.
 // -------------------------------------------------------------
-import {
-  InMemoryVendorRepository,
-  InMemoryInvoiceRepository,
-  InMemoryPricingRepository,
-  InMemoryCreditMemoRepository,
-  ConsoleNotificationService
-} from "./in-memory-db";
 
-// -------------------------------------------------------------
-// REAL EXTERNAL IMPLEMENTATIONS
-// -------------------------------------------------------------
-import { 
-  SupabaseVendorRepository,
-  SupabaseInvoiceRepository,
-  SupabasePricingRepository,
-  SupabaseCreditMemoRepository
-} from "./supabase-db";
-import { ResendNotificationService } from "./resend-service";
-import { OpenAIVisionClient } from "./openai-ocr";
+const hasSupabase = !!(
+  process.env.NEXT_PUBLIC_SUPABASE_URL &&
+  (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+);
 
-/**
- * Dependency Injection Container / Service Locator
- * 
- * Automatically switches to a real backend if API keys are present.
- * Otherwise, gracefully degrades to In-Memory mocks so the app runs smoothly out-of-the-box.
- */
+// Lazy-load implementations to avoid importing native modules in client bundles.
+// These factories are only called from server-side code (API routes).
 
-const hasSupabase = !!process.env.NEXT_PUBLIC_SUPABASE_URL && !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+function createRepos() {
+  if (hasSupabase) {
+    const {
+      SupabaseVendorRepository,
+      SupabaseInvoiceRepository,
+      SupabasePricingRepository,
+      SupabaseCreditMemoRepository,
+    } = require("./supabase-db");
 
-export const vendorRepo: IVendorRepository = hasSupabase ? new SupabaseVendorRepository() : new InMemoryVendorRepository();
-export const invoiceRepo: IInvoiceRepository = hasSupabase ? new SupabaseInvoiceRepository() : new InMemoryInvoiceRepository();
-export const pricingRepo: IPricingRepository = hasSupabase ? new SupabasePricingRepository() : new InMemoryPricingRepository();
-export const creditMemoRepo: ICreditMemoRepository = hasSupabase ? new SupabaseCreditMemoRepository() : new InMemoryCreditMemoRepository();
+    return {
+      vendorRepo: new SupabaseVendorRepository() as IVendorRepository,
+      invoiceRepo: new SupabaseInvoiceRepository() as IInvoiceRepository,
+      pricingRepo: new SupabasePricingRepository() as IPricingRepository,
+      creditMemoRepo: new SupabaseCreditMemoRepository() as ICreditMemoRepository,
+    };
+  }
 
-export const notificationService: INotificationService = process.env.RESEND_API_KEY 
-  ? new ResendNotificationService() 
-  : new ConsoleNotificationService();
+  // Default: SQLite (zero-config local persistence)
+  const {
+    SQLiteVendorRepository,
+    SQLiteInvoiceRepository,
+    SQLitePricingRepository,
+    SQLiteCreditMemoRepository,
+  } = require("./sqlite-db");
 
-export const ocrClient: AntigravityOCRClient = new OpenAIVisionClient(); // OpenAIVisionClient handles its own fallback inside based on API key
+  return {
+    vendorRepo: new SQLiteVendorRepository() as IVendorRepository,
+    invoiceRepo: new SQLiteInvoiceRepository() as IInvoiceRepository,
+    pricingRepo: new SQLitePricingRepository() as IPricingRepository,
+    creditMemoRepo: new SQLiteCreditMemoRepository() as ICreditMemoRepository,
+  };
+}
 
+function createNotificationService(): INotificationService {
+  if (process.env.RESEND_API_KEY) {
+    const { ResendNotificationService } = require("./resend-service");
+    return new ResendNotificationService();
+  }
+  const { ConsoleNotificationService } = require("./in-memory-db");
+  return new ConsoleNotificationService();
+}
+
+function createOCRClient(): AntigravityOCRClient {
+  const { OpenAIVisionClient } = require("./openai-ocr");
+  return new OpenAIVisionClient();
+}
+
+// Singleton cache — repos are created once on first access
+let _repos: ReturnType<typeof createRepos> | null = null;
+let _notificationService: INotificationService | null = null;
+let _ocrClient: AntigravityOCRClient | null = null;
+
+function getRepos() {
+  if (!_repos) _repos = createRepos();
+  return _repos;
+}
+
+// Public accessors — used by API routes (server-side only)
+export function getVendorRepo(): IVendorRepository { return getRepos().vendorRepo; }
+export function getInvoiceRepo(): IInvoiceRepository { return getRepos().invoiceRepo; }
+export function getPricingRepo(): IPricingRepository { return getRepos().pricingRepo; }
+export function getCreditMemoRepo(): ICreditMemoRepository { return getRepos().creditMemoRepo; }
+
+export function getNotificationService(): INotificationService {
+  if (!_notificationService) _notificationService = createNotificationService();
+  return _notificationService;
+}
+
+export function getOCRClient(): AntigravityOCRClient {
+  if (!_ocrClient) _ocrClient = createOCRClient();
+  return _ocrClient;
+}
+
+/** Returns what backend is currently active (for the Setup Wizard UI) */
+export function getActiveBackend(): "supabase" | "sqlite" {
+  return hasSupabase ? "supabase" : "sqlite";
+}

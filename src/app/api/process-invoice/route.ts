@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ocrClient, vendorRepo, pricingRepo, creditMemoRepo } from "@/lib/services";
+import { getOCRClient, getVendorRepo, getPricingRepo, getCreditMemoRepo } from "@/lib/services";
 import { extractRestaurantInvoiceData, RestaurantInvoice } from "@/lib/ocr";
 import { processInvoiceIngestion, InvoiceItem } from "@/lib/comparison";
 import { draftMemosForInvoice } from "@/lib/notifications";
@@ -17,9 +17,8 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // 2. Perform OCR Extraction using our abstract OCR client
-    // Note: If OpenAI keys aren't present, ocrClient might be a mock that returns fixed data
-    // for demonstration purposes. We'll build the mock next.
+    // 2. Perform OCR Extraction
+    const ocrClient = getOCRClient();
     let invoiceData: RestaurantInvoice;
     try {
       invoiceData = await extractRestaurantInvoiceData(buffer, ocrClient);
@@ -31,14 +30,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No items could be extracted from this invoice." }, { status: 400 });
     }
 
-    // Attempt to lookup or auto-create a vendor ID simply based on the name extracted.
-    // In a full production app, you might do a fuzzy search against the vendor database.
-    // For this prototype, if we don't recognize the exact string, we simulate finding or creating one.
+    // Attempt to lookup or auto-create a vendor ID
+    const vendorRepo = getVendorRepo();
     let vendorId = "v-unknown";
     if (invoiceData.vendorName.toLowerCase().includes("sysco")) vendorId = "v-001";
     if (invoiceData.vendorName.toLowerCase().includes("us foods")) vendorId = "v-002";
 
     // Format OCR extraction into items ready for comparison
+    const pricingRepo = getPricingRepo();
     const ingestedItems: InvoiceItem[] = invoiceData.items.map((item) => ({
       vendorId: vendorId,
       productSku: item.itemNameOrSku,
@@ -55,8 +54,8 @@ export async function POST(request: NextRequest) {
     );
 
     // 4. Draft Credit Memos for flagged items
+    const creditMemoRepo = getCreditMemoRepo();
     if (ingestionSummary.flaggedItems.length > 0) {
-      // Look up a mock invoice number, or use a date-based one if OCR missed it
       const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
       
       const newDrafts = await draftMemosForInvoice(
@@ -65,7 +64,6 @@ export async function POST(request: NextRequest) {
         vendorRepo
       );
 
-      // Save drafts to our database / repository
       for (const draft of newDrafts) {
         await creditMemoRepo.saveDraft(draft);
       }

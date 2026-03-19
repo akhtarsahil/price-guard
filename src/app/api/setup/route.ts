@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFileSync, existsSync, readFileSync } from "fs";
+import { writeFileSync, existsSync } from "fs";
 import { join } from "path";
+import { ensureDataDir, hasSaveFile } from "@/lib/mock-persistence";
 
 const ENV_PATH = join(process.cwd(), ".env.local");
 
@@ -14,6 +15,7 @@ export async function GET() {
     resend: !!process.env.RESEND_API_KEY,
     supabase: !!(process.env.NEXT_PUBLIC_SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)),
     envFileExists: existsSync(ENV_PATH),
+    dataDirReady: hasSaveFile(),
   };
 
   return NextResponse.json(status);
@@ -71,8 +73,11 @@ export async function POST(request: NextRequest) {
 
     const envContent = lines.join("\n");
 
-    // Write the file
+    // Write the .env.local file
     writeFileSync(ENV_PATH, envContent, "utf-8");
+
+    // Initialize the local data directory for mock mode persistence
+    ensureDataDir();
 
     return NextResponse.json({ 
       success: true, 

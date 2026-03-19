@@ -4,21 +4,24 @@ import { useState, useEffect } from "react";
 import { NotificationDashboard } from "@/components/Dashboard";
 import { UploadInvoice } from "@/components/UploadInvoice";
 import { PendingCreditMemo } from "@/lib/notifications";
-import { creditMemoRepo, notificationService } from "@/lib/services";
 
 export default function Home() {
   const [drafts, setDrafts] = useState<PendingCreditMemo[]>([]);
   const [sentCount, setSentCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load drafts on component mount
+  // Load drafts via API route
   const loadMemos = async () => {
     setIsLoading(true);
-    const pending = await creditMemoRepo.getPendingMemos();
-    // Sort so newest are on top (just in case)
-    pending.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    setDrafts(pending);
-    setIsLoading(false);
+    try {
+      const res = await fetch("/api/memos");
+      const data = await res.json();
+      setDrafts(data.memos || []);
+    } catch (err) {
+      console.error("Failed to load memos:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -26,35 +29,34 @@ export default function Home() {
   }, []);
 
   const handleUploadSuccess = () => {
-    // When a newly uploaded invoice is processed successfully,
-    // refresh the list of pending credit memos from the repository
     loadMemos();
   };
 
   const handleApproveAndSend = async (id: string) => {
-    // 1. Get the memo
-    const memo = await creditMemoRepo.getMemoById(id);
-    if (!memo) return;
+    try {
+      const res = await fetch(`/api/memos/${id}/approve`, { method: "POST" });
+      const data = await res.json();
 
-    // 2. Dispatch via Notification Service
-    const success = await notificationService.sendCreditMemo(memo);
-    
-    // 3. Update Status in Repository
-    if (success) {
-      await creditMemoRepo.updateMemoStatus(id, "SENT");
-      
-      // Update local state temporarily for snappy UI (or refetch)
-      setDrafts((prev) => prev.filter((d) => d.id !== id));
-      setSentCount((prev) => prev + 1);
+      if (data.success) {
+        setDrafts((prev) => prev.filter((d) => d.id !== id));
+        setSentCount((prev) => prev + 1);
+      }
+    } catch (err) {
+      console.error("Failed to approve memo:", err);
     }
   };
 
   const handleDismiss = async (id: string) => {
-    // 1. Update status in Database / Repository
-    await creditMemoRepo.updateMemoStatus(id, "DISMISSED");
-    
-    // 2. Update local state for snappy UI
-    setDrafts((prev) => prev.filter((d) => d.id !== id));
+    try {
+      const res = await fetch(`/api/memos/${id}/dismiss`, { method: "POST" });
+      const data = await res.json();
+
+      if (data.success) {
+        setDrafts((prev) => prev.filter((d) => d.id !== id));
+      }
+    } catch (err) {
+      console.error("Failed to dismiss memo:", err);
+    }
   };
 
   if (isLoading && drafts.length === 0) {

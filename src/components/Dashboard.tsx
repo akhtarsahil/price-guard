@@ -27,7 +27,7 @@ export function NotificationDashboard({ drafts, onApproveAndSend, onDismiss }: D
         </span>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-6 grid-cols-1">
         {drafts.map((draft) => (
           <div 
             key={draft.id} 

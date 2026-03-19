@@ -10,8 +10,43 @@ import {
 import { ProductPricing } from "./pricing";
 import { PendingCreditMemo } from "./notifications";
 
-// Mock Data from original implementation
-const MOCK_DRAFTS: PendingCreditMemo[] = [
+// ---------------------------------------------------------------
+// Persistence helpers — only active server-side
+//
+// We use inline dynamic imports to avoid pulling 'fs' or 'path'
+// into the client bundle. On the client side these are no-ops.
+// ---------------------------------------------------------------
+
+function persistLoad<V>(storeName: string): Map<string, V> | null {
+  if (typeof window !== "undefined") return null;
+  try {
+    const { loadStore } = require("./mock-persistence");
+    return loadStore<V>(storeName);
+  } catch {
+    return null;
+  }
+}
+
+function persistSave<V>(storeName: string, map: Map<string, V>): void {
+  if (typeof window !== "undefined") return;
+  try {
+    const { saveStore } = require("./mock-persistence");
+    saveStore(storeName, map);
+  } catch {
+    // no-op
+  }
+}
+
+// ---------------------------------------------------------------
+// Seed Data — used when no save file exists
+// ---------------------------------------------------------------
+
+const SEED_VENDORS: Vendor[] = [
+  { id: "v-001", name: "Sysco Foods", email: "accounts@sysco.example.com" },
+  { id: "v-002", name: "US Foods", email: "billing@usfoods.example.com" }
+];
+
+const SEED_DRAFTS: PendingCreditMemo[] = [
   {
     id: "memo-1",
     vendorId: "v-001",
@@ -58,16 +93,29 @@ const MOCK_DRAFTS: PendingCreditMemo[] = [
   }
 ];
 
-const MOCK_VENDORS: Vendor[] = [
-  { id: "v-001", name: "Sysco Foods", email: "accounts@sysco.example.com" },
-  { id: "v-002", name: "US Foods", email: "billing@usfoods.example.com" }
-];
+// ---------------------------------------------------------------
+// Helper: Load a store from disk or seed with defaults
+// ---------------------------------------------------------------
+
+function loadOrSeed<V>(storeName: string, seedData: [string, V][]): Map<string, V> {
+  const saved = persistLoad<V>(storeName);
+  if (saved && saved.size > 0) {
+    return saved;
+  }
+  const map = new Map<string, V>(seedData);
+  persistSave(storeName, map);
+  return map;
+}
+
+// ---------------------------------------------------------------
+// PERSISTED IN-MEMORY REPOSITORIES
+// ---------------------------------------------------------------
 
 export class InMemoryVendorRepository implements IVendorRepository {
-  private vendors = new Map<string, Vendor>();
+  private vendors: Map<string, Vendor>;
 
   constructor() {
-    MOCK_VENDORS.forEach(v => this.vendors.set(v.id, v));
+    this.vendors = loadOrSeed("vendors", SEED_VENDORS.map(v => [v.id, v]));
   }
 
   async getVendorById(id: string): Promise<Vendor | null> {
@@ -76,14 +124,20 @@ export class InMemoryVendorRepository implements IVendorRepository {
 
   async saveVendor(vendor: Vendor): Promise<void> {
     this.vendors.set(vendor.id, vendor);
+    persistSave("vendors", this.vendors);
   }
 }
 
 export class InMemoryInvoiceRepository implements IInvoiceRepository {
-  private invoices = new Map<string, Invoice>();
+  private invoices: Map<string, Invoice>;
+
+  constructor() {
+    this.invoices = loadOrSeed("invoices", []);
+  }
 
   async saveInvoice(invoice: Invoice): Promise<void> {
     this.invoices.set(invoice.id, invoice);
+    persistSave("invoices", this.invoices);
   }
 
   async getInvoiceById(id: string): Promise<Invoice | null> {
@@ -92,7 +146,11 @@ export class InMemoryInvoiceRepository implements IInvoiceRepository {
 }
 
 export class InMemoryPricingRepository implements IPricingRepository {
-  private pricingData = new Map<string, ProductPricing>();
+  private pricingData: Map<string, ProductPricing>;
+
+  constructor() {
+    this.pricingData = loadOrSeed("pricing", []);
+  }
 
   async getHistoricalPricing(vendorId: string, productSku: string): Promise<ProductPricing | null> {
     const key = `${vendorId}-${productSku}`;
@@ -113,14 +171,15 @@ export class InMemoryPricingRepository implements IPricingRepository {
     }
     
     this.pricingData.set(key, existing);
+    persistSave("pricing", this.pricingData);
   }
 }
 
 export class InMemoryCreditMemoRepository implements ICreditMemoRepository {
-  private memos = new Map<string, PendingCreditMemo>();
+  private memos: Map<string, PendingCreditMemo>;
 
   constructor() {
-    MOCK_DRAFTS.forEach(m => this.memos.set(m.id, m));
+    this.memos = loadOrSeed("creditMemos", SEED_DRAFTS.map(m => [m.id, m]));
   }
 
   async getPendingMemos(): Promise<PendingCreditMemo[]> {
@@ -133,21 +192,18 @@ export class InMemoryCreditMemoRepository implements ICreditMemoRepository {
 
   async saveDraft(memo: PendingCreditMemo): Promise<void> {
     this.memos.set(memo.id, memo);
+    persistSave("creditMemos", this.memos);
   }
 
   async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED"): Promise<void> {
     const memo = this.memos.get(id);
     if (memo) {
-      // In a real DB, you'd just update the status field.
-      // Since it's no longer DRAFT, next time `getPendingMemos` is called, it won't be returned.
-      // To mimic the UI logic (and for type safety with the existing interface), 
-      // we'll cast the status, or just delete it if dismissed.
       if (status === "DISMISSED") {
          this.memos.delete(id);
       } else {
-         // Force cast for now, though our interface says "DRAFT"|"APPROVED"|"SENT"
          (memo.status as any) = status;
       }
+      persistSave("creditMemos", this.memos);
     }
   }
 }
@@ -156,6 +212,6 @@ export class ConsoleNotificationService implements INotificationService {
   async sendCreditMemo(memo: PendingCreditMemo): Promise<boolean> {
     console.log(`[Email Sent] To: ${memo.vendorEmail}`);
     console.log(`[Subject] Credit Request - Invoice ${memo.invoiceNumber}`);
-    return true; // Simulate success
+    return true;
   }
 }
