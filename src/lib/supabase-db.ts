@@ -4,6 +4,8 @@ import {
   IInvoiceRepository,
   IPricingRepository,
   ICreditMemoRepository,
+  IAuditLogRepository,
+  AuditLogEntry,
   Vendor,
   Invoice
 } from "./interfaces";
@@ -39,6 +41,16 @@ export class SupabaseVendorRepository extends SupabaseDatabase implements IVendo
   async saveVendor(vendor: Vendor): Promise<void> {
     if (!this.supabase) return;
     await this.supabase.from('vendors').upsert(vendor);
+  }
+
+  async getAllVendors(): Promise<Vendor[]> {
+    if (!this.supabase) return [];
+    const { data, error } = await this.supabase
+      .from('vendors')
+      .select('*')
+      .order('name', { ascending: true });
+    if (error || !data) return [];
+    return data as Vendor[];
   }
 }
 
@@ -112,6 +124,22 @@ export class SupabasePricingRepository extends SupabaseDatabase implements IPric
       price_history: updatedHistory
     }, { onConflict: 'vendor_id,product_sku' });
   }
+
+  async getPricingByVendor(vendorId: string): Promise<ProductPricing[]> {
+    if (!this.supabase) return [];
+    const { data, error } = await this.supabase
+      .from('product_pricing')
+      .select('*')
+      .eq('vendor_id', vendorId)
+      .order('product_sku', { ascending: true });
+    if (error || !data) return [];
+    return data.map((r: any) => ({
+      vendorId: r.vendor_id,
+      productSku: r.product_sku,
+      contractPrice: r.contract_price,
+      priceHistory: r.price_history || [],
+    }));
+  }
 }
 
 export class SupabaseCreditMemoRepository extends SupabaseDatabase implements ICreditMemoRepository {
@@ -175,12 +203,89 @@ export class SupabaseCreditMemoRepository extends SupabaseDatabase implements IC
 
   async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED"): Promise<void> {
     if (!this.supabase) return;
+    await this.supabase.from('credit_memos').update({ status }).eq('id', id);
+  }
 
-    if (status === "DISMISSED") {
-      // Hard delete for dismissals, or could just set status
-      await this.supabase.from('credit_memos').delete().eq('id', id);
-    } else {
-      await this.supabase.from('credit_memos').update({ status }).eq('id', id);
-    }
+  async getAllMemos(): Promise<PendingCreditMemo[]> {
+    if (!this.supabase) return [];
+    const { data, error } = await this.supabase
+      .from('credit_memos')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error || !data) return [];
+    return data.map(this.mapToMemo);
+  }
+}
+
+export class SupabaseAuditLogRepository extends SupabaseDatabase implements IAuditLogRepository {
+  async logEntry(entry: AuditLogEntry): Promise<void> {
+    if (!this.supabase) return;
+    await this.supabase.from('variance_audit_log').insert({
+      id: entry.id,
+      invoice_id: entry.invoiceId,
+      line_item_index: entry.lineItemIndex,
+      vendor_id: entry.vendorId,
+      item_sku: entry.itemSku,
+      billed_price: entry.billedPrice,
+      reference_price: entry.referencePrice,
+      reference_type: entry.referenceType,
+      variance_pct: entry.variancePct,
+      overcharge: entry.overcharge,
+      flag_type: entry.flagType,
+      threshold_applied: entry.thresholdApplied,
+      logged_at: entry.loggedAt,
+    });
+  }
+
+  async getEntriesByInvoice(invoiceId: string): Promise<AuditLogEntry[]> {
+    if (!this.supabase) return [];
+    const { data, error } = await this.supabase
+      .from('variance_audit_log')
+      .select('*')
+      .eq('invoice_id', invoiceId)
+      .order('line_item_index', { ascending: true });
+
+    if (error || !data) return [];
+    return data.map((r: any) => ({
+      id: r.id,
+      invoiceId: r.invoice_id,
+      lineItemIndex: r.line_item_index,
+      vendorId: r.vendor_id,
+      itemSku: r.item_sku,
+      billedPrice: r.billed_price,
+      referencePrice: r.reference_price,
+      referenceType: r.reference_type,
+      variancePct: r.variance_pct,
+      overcharge: r.overcharge,
+      flagType: r.flag_type,
+      thresholdApplied: r.threshold_applied,
+      loggedAt: r.logged_at,
+    }));
+  }
+
+  async getRecentEntries(limit: number = 100): Promise<AuditLogEntry[]> {
+    if (!this.supabase) return [];
+    const { data, error } = await this.supabase
+      .from('variance_audit_log')
+      .select('*')
+      .order('logged_at', { ascending: false })
+      .limit(limit);
+
+    if (error || !data) return [];
+    return data.map((r: any) => ({
+      id: r.id,
+      invoiceId: r.invoice_id,
+      lineItemIndex: r.line_item_index,
+      vendorId: r.vendor_id,
+      itemSku: r.item_sku,
+      billedPrice: r.billed_price,
+      referencePrice: r.reference_price,
+      referenceType: r.reference_type,
+      variancePct: r.variance_pct,
+      overcharge: r.overcharge,
+      flagType: r.flag_type,
+      thresholdApplied: r.threshold_applied,
+      loggedAt: r.logged_at,
+    }));
   }
 }

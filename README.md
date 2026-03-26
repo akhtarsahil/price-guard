@@ -2,58 +2,115 @@
 
 Intelligent AP Pricing & Monitoring. Automatically scan invoices via AI OCR, detect pricing leakage, and trigger credit memos in one click.
 
-## Out-of-the-Box Experience (Mock Mode)
-
-By default, **Price Guard runs perfectly out-of-the-box without any external services.**
-
-If no API keys are provided, the application relies on an **In-Memory Service Layer**:
-- **OCR Uploads:** Uploading any image will simulate a 1.5s extraction delay and return a structured mock invoice.
-- **Database:** Approved, pending, and dismissed credit memos are stored in RAM. They will reset when the server restarts.
-- **Emails:** Clicking "Approve & Send" logs the email body to your server console instead of actually emailing the vendor.
-
-To run the app in Mock Mode right now:
+## Quick Start (Local Development)
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see it in action.
+Open [http://localhost:3000](http://localhost:3000). Default login password is `admin`.
 
 Then visit [http://localhost:3000/setup](http://localhost:3000/setup) (or click **⚙ Setup** in the top-right corner of the dashboard) to launch the **Setup Wizard** — a guided, in-app configuration tool that walks you through connecting your own API keys.
 
 ---
 
+## Authentication
+
+The app is password-protected. On first run the default password is `admin`.
+
+### Changing the Password
+
+1. Generate a hash for your new password:
+   ```bash
+   node -e "const c=require('crypto');console.log(c.createHash('sha256').update('pg-salt:YOUR_PASSWORD_HERE').digest('hex'))"
+   ```
+2. Set it in your `.env.local`:
+   ```env
+   ADMIN_PASSWORD_HASH=<hash from step 1>
+   ```
+3. Optionally set a signing secret (auto-generated if omitted):
+   ```env
+   AUTH_SECRET=any-random-string-here
+   ```
+
+---
+
+## Data Export
+
+CSV exports are available from the dashboard:
+- **Audit Log** — Auditor tab → "Export CSV"
+- **Credit Memos** — History tab → "Export CSV"  
+- **Vendors & Pricing** — Vendors page → "Export CSV"
+
+---
+
+## Deployment
+
+### Option 1: Docker (Recommended for VPS / On-Premise)
+
+```bash
+# Build the image
+docker build -t price-guard .
+
+# Run with SQLite persistence
+docker run -d \
+  --name price-guard \
+  -p 3000:3000 \
+  -v price-guard-data:/app/data \
+  -e ADMIN_PASSWORD_HASH=your_hash_here \
+  -e AUTH_SECRET=your_secret_here \
+  price-guard
+```
+
+SQLite data persists in the `price-guard-data` Docker volume.
+
+### Option 2: Vercel + Supabase (Serverless)
+
+1. Push to GitHub
+2. Import in [Vercel](https://vercel.com)
+3. Set environment variables:
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=ey...
+   ADMIN_PASSWORD_HASH=your_hash
+   AUTH_SECRET=your_secret
+   ```
+4. Run `supabase-schema.sql` in your Supabase SQL Editor
+
+> **Note:** SQLite won't persist on Vercel. You must use Supabase for the database when deploying serverless.
+
+### Option 3: VPS / Bare Metal
+
+```bash
+npm install
+npm run build
+ADMIN_PASSWORD_HASH=your_hash AUTH_SECRET=your_secret npm start
+```
+
+---
+
 ## Production Setup (Real Backends)
 
-Price Guard is fully configured to use real external SDKs automatically if the correct environment variables are provided.
-
-### 1. Configure `.env.local`
-
-Create a `.env.local` file in the root of the project to activate the real services:
+### Configure `.env.local`
 
 ```env
-# 1. Real AI OCR Extraction (OpenAI Vision)
-# Requires a funded OpenAI account
+# AI OCR Extraction (OpenAI Vision)
 OPENAI_API_KEY=sk-your-openai-key-here
 
-# 2. Real Email Dispatching (Resend)
-# Creates real email drafts sent to vendors
+# Email Dispatching (Resend)
 RESEND_API_KEY=re_your_resend_key_here
 FROM_EMAIL=accounts@your-domain.com 
 
-# 3. Real Database Persistence (Supabase PostgreSQL)
+# Database Persistence (Supabase PostgreSQL)
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-# Use the Service Role Key so the server can bypass RLS for now
 SUPABASE_SERVICE_ROLE_KEY=ey...
+
+# Authentication
+ADMIN_PASSWORD_HASH=your_sha256_hash
+AUTH_SECRET=any-random-string
 ```
 
-### 2. Setup Supabase Database
+### Setup Supabase Database
 
-If you provided the Supabase URLs above, you must initialize the database tables.
-
-Copy the SQL from `supabase-schema.sql` (found in the root directory) and execute it in your Supabase project's SQL Editor to create the `vendors`, `invoices`, `product_pricing`, and `credit_memos` tables.
-
-### 3. Run Production Server
-
-Once configured, restart the Next.js server. The `src/lib/services.ts` locator will instantly transition the app from the In-Memory mock repositories to the real, stateful Supabase/OpenAI/Resend implementations.
+Copy the SQL from `supabase-schema.sql` and execute it in your Supabase project's SQL Editor.

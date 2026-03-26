@@ -3,6 +3,7 @@ import {
   IInvoiceRepository,
   IPricingRepository,
   ICreditMemoRepository,
+  IAuditLogRepository,
   INotificationService,
 } from "./interfaces";
 
@@ -34,6 +35,7 @@ function createRepos() {
       SupabaseInvoiceRepository,
       SupabasePricingRepository,
       SupabaseCreditMemoRepository,
+      SupabaseAuditLogRepository,
     } = require("./supabase-db");
 
     return {
@@ -41,6 +43,7 @@ function createRepos() {
       invoiceRepo: new SupabaseInvoiceRepository() as IInvoiceRepository,
       pricingRepo: new SupabasePricingRepository() as IPricingRepository,
       creditMemoRepo: new SupabaseCreditMemoRepository() as ICreditMemoRepository,
+      auditLogRepo: new SupabaseAuditLogRepository() as IAuditLogRepository,
     };
   }
 
@@ -50,6 +53,7 @@ function createRepos() {
     SQLiteInvoiceRepository,
     SQLitePricingRepository,
     SQLiteCreditMemoRepository,
+    SQLiteAuditLogRepository,
   } = require("./sqlite-db");
 
   return {
@@ -57,6 +61,7 @@ function createRepos() {
     invoiceRepo: new SQLiteInvoiceRepository() as IInvoiceRepository,
     pricingRepo: new SQLitePricingRepository() as IPricingRepository,
     creditMemoRepo: new SQLiteCreditMemoRepository() as ICreditMemoRepository,
+    auditLogRepo: new SQLiteAuditLogRepository() as IAuditLogRepository,
   };
 }
 
@@ -89,6 +94,7 @@ export function getVendorRepo(): IVendorRepository { return getRepos().vendorRep
 export function getInvoiceRepo(): IInvoiceRepository { return getRepos().invoiceRepo; }
 export function getPricingRepo(): IPricingRepository { return getRepos().pricingRepo; }
 export function getCreditMemoRepo(): ICreditMemoRepository { return getRepos().creditMemoRepo; }
+export function getAuditLogRepo(): IAuditLogRepository { return getRepos().auditLogRepo; }
 
 export function getNotificationService(): INotificationService {
   if (!_notificationService) _notificationService = createNotificationService();

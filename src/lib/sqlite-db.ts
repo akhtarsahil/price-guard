@@ -17,6 +17,8 @@ import {
   IInvoiceRepository,
   IPricingRepository,
   ICreditMemoRepository,
+  IAuditLogRepository,
+  AuditLogEntry,
   Vendor,
   Invoice,
 } from "./interfaces";
@@ -82,6 +84,22 @@ function initializeTables(db: Database.Database) {
       status TEXT NOT NULL DEFAULT 'DRAFT',
       created_at TEXT NOT NULL,
       compiled_email_body TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS variance_audit_log (
+      id TEXT PRIMARY KEY,
+      invoice_id TEXT,
+      line_item_index INTEGER NOT NULL,
+      vendor_id TEXT NOT NULL,
+      item_sku TEXT NOT NULL,
+      billed_price REAL NOT NULL,
+      reference_price REAL NOT NULL,
+      reference_type TEXT NOT NULL,
+      variance_pct REAL DEFAULT 0,
+      overcharge REAL DEFAULT 0,
+      flag_type TEXT,
+      threshold_applied TEXT NOT NULL,
+      logged_at TEXT NOT NULL
     );
   `);
 }
@@ -155,6 +173,29 @@ function seedDefaults(db: Database.Database) {
       new Date().toISOString(),
       "Subject: Price Discrepancy & Credit Request - Invoice #INV-883719\n\nDear US Foods Team,\n\nWe are writing to you regarding a review of our recent invoice (Invoice #INV-883719) dated today. Our automated pricing system flagged a significant price hike compared to our trailing moving average..."
     );
+
+    // Seed mock audit log entries
+    const insertAudit = db.prepare(
+      `INSERT OR REPLACE INTO variance_audit_log
+       (id, invoice_id, line_item_index, vendor_id, item_sku, billed_price,
+        reference_price, reference_type, variance_pct, overcharge,
+        flag_type, threshold_applied, logged_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    
+    // First invoice (Sysco) - 4 items
+    const timeSysco = new Date(Date.now() - 3600000).toISOString();
+    insertAudit.run("audit-INV-992384-0", "INV-992384", 0, "v-001", "BEEF-RIBEYE-CHOICE", 14.50, 12.00, "contract", 20.83, 125.00, "CONTRACT_VIOLATION", "Exceeded contract price (0% tolerance)", timeSysco);
+    insertAudit.run("audit-INV-992384-1", "INV-992384", 1, "v-001", "CHICKEN-BREAST-BULK", 4.10, 4.00, "moving_avg", 2.50, 0.00, null, "PASS", timeSysco);
+    insertAudit.run("audit-INV-992384-2", "INV-992384", 2, "v-001", "FRIES-FROZEN-3/8", 22.00, 22.00, "contract", 0.00, 0.00, null, "PASS", timeSysco);
+    insertAudit.run("audit-INV-992384-3", "INV-992384", 3, "v-001", "FLOUR-ALL-PURPOSE", 18.00, 16.50, "moving_avg", 9.09, 15.00, "PRICE_HIKE", "Exceeded 5% moving avg buffer", timeSysco);
+
+    // Second invoice (US Foods) - 4 items
+    const timeUSFoods = new Date(Date.now() - 7200000).toISOString();
+    insertAudit.run("audit-INV-883719-0", "INV-883719", 0, "v-002", "PRODUCE-AVOCADO-CASE", 65.00, 45.00, "moving_avg", 44.44, 100.00, "PRICE_HIKE", "Exceeded 5% moving avg buffer", timeUSFoods);
+    insertAudit.run("audit-INV-883719-1", "INV-883719", 1, "v-002", "PRODUCE-TOMATO-ROMA", 24.00, 24.50, "moving_avg", -2.04, 0.00, null, "PASS", timeUSFoods);
+    insertAudit.run("audit-INV-883719-2", "INV-883719", 2, "v-002", "DAIRY-MILK-WHOLE", 4.80, 4.50, "contract", 6.67, 12.00, "CONTRACT_VIOLATION", "Exceeded contract price (0% tolerance)", timeUSFoods);
+    insertAudit.run("audit-INV-883719-3", "INV-883719", 3, "v-002", "PAPER-TOWELS-ROLL", 32.00, 31.00, "moving_avg", 3.23, 0.00, null, "PASS", timeUSFoods);
   }
 }
 
@@ -173,6 +214,11 @@ export class SQLiteVendorRepository implements IVendorRepository {
     getDb().prepare(
       "INSERT OR REPLACE INTO vendors (id, name, email) VALUES (?, ?, ?)"
     ).run(vendor.id, vendor.name, vendor.email);
+  }
+
+  async getAllVendors(): Promise<Vendor[]> {
+    const rows = getDb().prepare("SELECT * FROM vendors ORDER BY name ASC").all() as any[];
+    return rows.map((r) => ({ id: r.id, name: r.name, email: r.email }));
   }
 }
 
@@ -232,6 +278,18 @@ export class SQLitePricingRepository implements IPricingRepository {
       "INSERT OR REPLACE INTO product_pricing (vendor_id, product_sku, contract_price, price_history) VALUES (?, ?, ?, ?)"
     ).run(vendorId, productSku, existing?.contractPrice || 0, JSON.stringify(history));
   }
+
+  async getPricingByVendor(vendorId: string): Promise<ProductPricing[]> {
+    const rows = getDb().prepare(
+      "SELECT * FROM product_pricing WHERE vendor_id = ? ORDER BY product_sku ASC"
+    ).all(vendorId) as any[];
+    return rows.map((r) => ({
+      vendorId: r.vendor_id,
+      productSku: r.product_sku,
+      contractPrice: r.contract_price,
+      priceHistory: JSON.parse(r.price_history),
+    }));
+  }
 }
 
 export class SQLiteCreditMemoRepository implements ICreditMemoRepository {
@@ -279,10 +337,81 @@ export class SQLiteCreditMemoRepository implements ICreditMemoRepository {
   }
 
   async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED"): Promise<void> {
-    if (status === "DISMISSED") {
-      getDb().prepare("DELETE FROM credit_memos WHERE id = ?").run(id);
-    } else {
-      getDb().prepare("UPDATE credit_memos SET status = ? WHERE id = ?").run(status, id);
-    }
+    getDb().prepare("UPDATE credit_memos SET status = ? WHERE id = ?").run(status, id);
+  }
+
+  async getAllMemos(): Promise<PendingCreditMemo[]> {
+    const rows = getDb().prepare(
+      "SELECT * FROM credit_memos ORDER BY created_at DESC"
+    ).all() as any[];
+    return rows.map(this.mapRow);
+  }
+}
+
+export class SQLiteAuditLogRepository implements IAuditLogRepository {
+  async logEntry(entry: AuditLogEntry): Promise<void> {
+    getDb().prepare(
+      `INSERT OR REPLACE INTO variance_audit_log
+       (id, invoice_id, line_item_index, vendor_id, item_sku, billed_price,
+        reference_price, reference_type, variance_pct, overcharge,
+        flag_type, threshold_applied, logged_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      entry.id,
+      entry.invoiceId,
+      entry.lineItemIndex,
+      entry.vendorId,
+      entry.itemSku,
+      entry.billedPrice,
+      entry.referencePrice,
+      entry.referenceType,
+      entry.variancePct,
+      entry.overcharge,
+      entry.flagType,
+      entry.thresholdApplied,
+      entry.loggedAt
+    );
+  }
+
+  async getEntriesByInvoice(invoiceId: string): Promise<AuditLogEntry[]> {
+    const rows = getDb().prepare(
+      "SELECT * FROM variance_audit_log WHERE invoice_id = ? ORDER BY line_item_index ASC"
+    ).all(invoiceId) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      invoiceId: r.invoice_id,
+      lineItemIndex: r.line_item_index,
+      vendorId: r.vendor_id,
+      itemSku: r.item_sku,
+      billedPrice: r.billed_price,
+      referencePrice: r.reference_price,
+      referenceType: r.reference_type,
+      variancePct: r.variance_pct,
+      overcharge: r.overcharge,
+      flagType: r.flag_type,
+      thresholdApplied: r.threshold_applied,
+      loggedAt: r.logged_at,
+    }));
+  }
+
+  async getRecentEntries(limit: number = 100): Promise<AuditLogEntry[]> {
+    const rows = getDb().prepare(
+      "SELECT * FROM variance_audit_log ORDER BY logged_at DESC LIMIT ?"
+    ).all(limit) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      invoiceId: r.invoice_id,
+      lineItemIndex: r.line_item_index,
+      vendorId: r.vendor_id,
+      itemSku: r.item_sku,
+      billedPrice: r.billed_price,
+      referencePrice: r.reference_price,
+      referenceType: r.reference_type,
+      variancePct: r.variance_pct,
+      overcharge: r.overcharge,
+      flagType: r.flag_type,
+      thresholdApplied: r.threshold_applied,
+      loggedAt: r.logged_at,
+    }));
   }
 }

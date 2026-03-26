@@ -4,6 +4,8 @@ import {
   IInvoiceRepository,
   IPricingRepository,
   ICreditMemoRepository,
+  IAuditLogRepository,
+  AuditLogEntry,
   INotificationService,
   Invoice
 } from "./interfaces";
@@ -21,7 +23,7 @@ function persistLoad<V>(storeName: string): Map<string, V> | null {
   if (typeof window !== "undefined") return null;
   try {
     const { loadStore } = require("./mock-persistence");
-    return loadStore<V>(storeName);
+    return loadStore(storeName) as Map<string, V> | null;
   } catch {
     return null;
   }
@@ -93,6 +95,18 @@ const SEED_DRAFTS: PendingCreditMemo[] = [
   }
 ];
 
+const SEED_AUDITS: AuditLogEntry[] = [
+  { id: "audit-INV-992384-0", invoiceId: "INV-992384", lineItemIndex: 0, vendorId: "v-001", itemSku: "BEEF-RIBEYE-CHOICE", billedPrice: 14.50, referencePrice: 12.00, referenceType: "contract", variancePct: 20.83, overcharge: 125.00, flagType: "CONTRACT_VIOLATION", thresholdApplied: "Exceeded contract price (0% tolerance)", loggedAt: new Date(Date.now() - 3600000).toISOString() },
+  { id: "audit-INV-992384-1", invoiceId: "INV-992384", lineItemIndex: 1, vendorId: "v-001", itemSku: "CHICKEN-BREAST-BULK", billedPrice: 4.10, referencePrice: 4.00, referenceType: "moving_avg", variancePct: 2.5, overcharge: 0, flagType: null, thresholdApplied: "PASS", loggedAt: new Date(Date.now() - 3600000).toISOString() },
+  { id: "audit-INV-992384-2", invoiceId: "INV-992384", lineItemIndex: 2, vendorId: "v-001", itemSku: "FRIES-FROZEN-3/8", billedPrice: 22.00, referencePrice: 22.00, referenceType: "contract", variancePct: 0, overcharge: 0, flagType: null, thresholdApplied: "PASS", loggedAt: new Date(Date.now() - 3600000).toISOString() },
+  { id: "audit-INV-992384-3", invoiceId: "INV-992384", lineItemIndex: 3, vendorId: "v-001", itemSku: "FLOUR-ALL-PURPOSE", billedPrice: 18.00, referencePrice: 16.50, referenceType: "moving_avg", variancePct: 9.09, overcharge: 15.00, flagType: "PRICE_HIKE", thresholdApplied: "Exceeded 5% moving avg buffer", loggedAt: new Date(Date.now() - 3600000).toISOString() },
+  
+  { id: "audit-INV-883719-0", invoiceId: "INV-883719", lineItemIndex: 0, vendorId: "v-002", itemSku: "PRODUCE-AVOCADO-CASE", billedPrice: 65.00, referencePrice: 45.00, referenceType: "moving_avg", variancePct: 44.44, overcharge: 100.00, flagType: "PRICE_HIKE", thresholdApplied: "Exceeded 5% moving avg buffer", loggedAt: new Date(Date.now() - 7200000).toISOString() },
+  { id: "audit-INV-883719-1", invoiceId: "INV-883719", lineItemIndex: 1, vendorId: "v-002", itemSku: "PRODUCE-TOMATO-ROMA", billedPrice: 24.00, referencePrice: 24.50, referenceType: "moving_avg", variancePct: -2.04, overcharge: 0, flagType: null, thresholdApplied: "PASS", loggedAt: new Date(Date.now() - 7200000).toISOString() },
+  { id: "audit-INV-883719-2", invoiceId: "INV-883719", lineItemIndex: 2, vendorId: "v-002", itemSku: "DAIRY-MILK-WHOLE", billedPrice: 4.80, referencePrice: 4.50, referenceType: "contract", variancePct: 6.67, overcharge: 12.00, flagType: "CONTRACT_VIOLATION", thresholdApplied: "Exceeded contract price (0% tolerance)", loggedAt: new Date(Date.now() - 7200000).toISOString() },
+  { id: "audit-INV-883719-3", invoiceId: "INV-883719", lineItemIndex: 3, vendorId: "v-002", itemSku: "PAPER-TOWELS-ROLL", billedPrice: 32.00, referencePrice: 31.00, referenceType: "moving_avg", variancePct: 3.23, overcharge: 0, flagType: null, thresholdApplied: "PASS", loggedAt: new Date(Date.now() - 7200000).toISOString() }
+];
+
 // ---------------------------------------------------------------
 // Helper: Load a store from disk or seed with defaults
 // ---------------------------------------------------------------
@@ -125,6 +139,10 @@ export class InMemoryVendorRepository implements IVendorRepository {
   async saveVendor(vendor: Vendor): Promise<void> {
     this.vendors.set(vendor.id, vendor);
     persistSave("vendors", this.vendors);
+  }
+
+  async getAllVendors(): Promise<Vendor[]> {
+    return Array.from(this.vendors.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 }
 
@@ -173,6 +191,12 @@ export class InMemoryPricingRepository implements IPricingRepository {
     this.pricingData.set(key, existing);
     persistSave("pricing", this.pricingData);
   }
+
+  async getPricingByVendor(vendorId: string): Promise<ProductPricing[]> {
+    return Array.from(this.pricingData.values())
+      .filter((p) => p.vendorId === vendorId)
+      .sort((a, b) => a.productSku.localeCompare(b.productSku));
+  }
 }
 
 export class InMemoryCreditMemoRepository implements ICreditMemoRepository {
@@ -198,13 +222,50 @@ export class InMemoryCreditMemoRepository implements ICreditMemoRepository {
   async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED"): Promise<void> {
     const memo = this.memos.get(id);
     if (memo) {
-      if (status === "DISMISSED") {
-         this.memos.delete(id);
-      } else {
-         (memo.status as any) = status;
-      }
+      (memo.status as any) = status;
       persistSave("creditMemos", this.memos);
     }
+  }
+
+  async getAllMemos(): Promise<PendingCreditMemo[]> {
+    return Array.from(this.memos.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+}
+
+export class InMemoryAuditLogRepository implements IAuditLogRepository {
+  private logs: Map<string, AuditLogEntry[]>;
+
+  constructor() {
+    // We store the seed grouped by invoiceId
+    const seedMap = new Map<string, AuditLogEntry[]>();
+    SEED_AUDITS.forEach(a => {
+      const existing = seedMap.get(a.invoiceId) || [];
+      existing.push(a);
+      seedMap.set(a.invoiceId, existing);
+    });
+    
+    const flatSeedData = Array.from(seedMap.entries());
+    this.logs = loadOrSeed("auditLog", flatSeedData);
+  }
+
+  async logEntry(entry: AuditLogEntry): Promise<void> {
+    const existing = this.logs.get(entry.invoiceId) || [];
+    existing.push(entry);
+    this.logs.set(entry.invoiceId, existing);
+    persistSave("auditLog", this.logs);
+  }
+
+  async getEntriesByInvoice(invoiceId: string): Promise<AuditLogEntry[]> {
+    return this.logs.get(invoiceId) || [];
+  }
+
+  async getRecentEntries(limit: number = 100): Promise<AuditLogEntry[]> {
+    // Flatten the map, sort by date, and take top X
+    const allEntries = Array.from(this.logs.values()).flat();
+    allEntries.sort((a, b) => new Date(b.loggedAt).getTime() - new Date(a.loggedAt).getTime());
+    return allEntries.slice(0, limit);
   }
 }
 

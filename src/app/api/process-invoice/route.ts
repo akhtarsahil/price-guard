@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOCRClient, getVendorRepo, getPricingRepo, getCreditMemoRepo } from "@/lib/services";
+import { getOCRClient, getVendorRepo, getPricingRepo, getCreditMemoRepo, getAuditLogRepo } from "@/lib/services";
 import { extractRestaurantInvoiceData, RestaurantInvoice } from "@/lib/ocr";
 import { processInvoiceIngestion, InvoiceItem } from "@/lib/comparison";
 import { draftMemosForInvoice } from "@/lib/notifications";
@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
 
     // Format OCR extraction into items ready for comparison
     const pricingRepo = getPricingRepo();
+    const auditLogRepo = getAuditLogRepo();
+    const invoiceId = `inv-${Date.now()}`;
     const ingestedItems: InvoiceItem[] = invoiceData.items.map((item) => ({
       vendorId: vendorId,
       productSku: item.itemNameOrSku,
@@ -46,11 +48,13 @@ export async function POST(request: NextRequest) {
       totalAmount: item.totalAmount
     }));
 
-    // 3. Compare Prices against Database History
+    // 3. Compare Prices against Database History (with full audit logging)
     const ingestionSummary = await processInvoiceIngestion(
       ingestedItems,
       pricingRepo,
-      5 // 5% price hike threshold
+      5, // 5% price hike threshold
+      auditLogRepo,
+      invoiceId
     );
 
     // 4. Draft Credit Memos for flagged items

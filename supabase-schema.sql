@@ -40,3 +40,19 @@ CREATE TABLE credit_memos (
   created_at TEXT NOT NULL,
   compiled_email_body TEXT
 );
+
+CREATE TABLE variance_audit_log (
+  id              TEXT PRIMARY KEY,
+  invoice_id      TEXT REFERENCES invoices(id),
+  line_item_index INTEGER NOT NULL,
+  vendor_id       TEXT NOT NULL,
+  item_sku        TEXT NOT NULL,
+  billed_price    NUMERIC(12,4) NOT NULL,
+  reference_price NUMERIC(12,4) NOT NULL,
+  reference_type  TEXT NOT NULL,
+  variance_pct    NUMERIC(8,4) DEFAULT 0,
+  overcharge      NUMERIC(12,2) DEFAULT 0,
+  flag_type       TEXT,
+  threshold_applied TEXT NOT NULL,
+  logged_at       TEXT NOT NULL DEFAULT now()
+);
