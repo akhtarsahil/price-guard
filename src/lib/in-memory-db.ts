@@ -7,7 +7,11 @@ import {
   IAuditLogRepository,
   AuditLogEntry,
   INotificationService,
-  Invoice
+  ISettingsRepository,
+  IPasswordRepository,
+  Invoice,
+  AppSettings,
+  DEFAULT_SETTINGS,
 } from "./interfaces";
 import { ProductPricing } from "./pricing";
 import { PendingCreditMemo } from "./notifications";
@@ -161,6 +165,11 @@ export class InMemoryInvoiceRepository implements IInvoiceRepository {
   async getInvoiceById(id: string): Promise<Invoice | null> {
     return this.invoices.get(id) || null;
   }
+
+  async getAllInvoices(): Promise<Invoice[]> {
+    return Array.from(this.invoices.values())
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
 }
 
 export class InMemoryPricingRepository implements IPricingRepository {
@@ -196,6 +205,18 @@ export class InMemoryPricingRepository implements IPricingRepository {
     return Array.from(this.pricingData.values())
       .filter((p) => p.vendorId === vendorId)
       .sort((a, b) => a.productSku.localeCompare(b.productSku));
+  }
+
+  async updateContractPrice(vendorId: string, productSku: string, contractPrice: number): Promise<void> {
+    const key = `${vendorId}-${productSku}`;
+    let existing = this.pricingData.get(key);
+    if (!existing) {
+      existing = { vendorId, productSku, contractPrice, priceHistory: [] };
+    } else {
+      existing.contractPrice = contractPrice;
+    }
+    this.pricingData.set(key, existing);
+    persistSave("pricing", this.pricingData);
   }
 }
 
@@ -274,5 +295,45 @@ export class ConsoleNotificationService implements INotificationService {
     console.log(`[Email Sent] To: ${memo.vendorEmail}`);
     console.log(`[Subject] Credit Request - Invoice ${memo.invoiceNumber}`);
     return true;
+  }
+}
+
+export class InMemorySettingsRepository implements ISettingsRepository {
+  private settings: Map<string, AppSettings>;
+
+  constructor() {
+    this.settings = loadOrSeed("settings", [["app", DEFAULT_SETTINGS]]);
+  }
+
+  async getSettings(): Promise<AppSettings> {
+    return this.settings.get("app") || { ...DEFAULT_SETTINGS };
+  }
+
+  async saveSettings(settings: AppSettings): Promise<void> {
+    this.settings.set("app", settings);
+    persistSave("settings", this.settings);
+  }
+}
+
+export class InMemoryPasswordRepository implements IPasswordRepository {
+  private passwords: Map<string, string>;
+
+  constructor() {
+    this.passwords = loadOrSeed("passwords", []);
+  }
+
+  async getPasswordHash(): Promise<string> {
+    const hash = this.passwords.get("admin");
+    if (hash) return hash;
+    // Fall back to env var or default
+    if (process.env.ADMIN_PASSWORD_HASH) return process.env.ADMIN_PASSWORD_HASH;
+    // Default "admin" hash
+    const { hashPassword } = require("./auth");
+    return hashPassword("admin");
+  }
+
+  async setPasswordHash(hash: string): Promise<void> {
+    this.passwords.set("admin", hash);
+    persistSave("passwords", this.passwords);
   }
 }

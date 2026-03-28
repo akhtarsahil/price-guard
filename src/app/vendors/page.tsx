@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -10,6 +10,7 @@ import {
   TrendingUp,
   ArrowLeft,
   Download,
+  Pencil,
 } from "lucide-react";
 
 interface PriceEntry {
@@ -73,7 +74,92 @@ function Sparkline({ data }: { data: PriceEntry[] }) {
   );
 }
 
-function VendorRow({ vendor }: { vendor: VendorData }) {
+function EditablePrice({
+  vendorId,
+  productSku,
+  value,
+  onChange,
+}: {
+  vendorId: string;
+  productSku: string;
+  value: number;
+  onChange: (newPrice: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value.toFixed(2));
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const save = async () => {
+    const parsed = parseFloat(draft);
+    if (isNaN(parsed) || parsed < 0) {
+      setDraft(value.toFixed(2));
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    const prev = value;
+    onChange(parsed); // optimistic
+    try {
+      const res = await fetch("/api/vendors/pricing", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vendorId, productSku, contractPrice: parsed }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      onChange(prev); // revert
+    }
+    setSaving(false);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        step="0.01"
+        min="0"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+          if (e.key === "Escape") {
+            setDraft(value.toFixed(2));
+            setEditing(false);
+          }
+        }}
+        disabled={saving}
+        className="w-20 px-1.5 py-0.5 text-right font-mono text-sm bg-white dark:bg-zinc-800 border border-indigo-400 rounded focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={() => {
+        setDraft(value > 0 ? value.toFixed(2) : "0.00");
+        setEditing(true);
+      }}
+      className="group inline-flex items-center gap-1 font-mono text-zinc-600 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+      title="Click to edit contract price"
+    >
+      {value > 0 ? `$${value.toFixed(2)}` : "—"}
+      <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+    </button>
+  );
+}
+
+function VendorRow({ vendor, onPriceChange }: { vendor: VendorData; onPriceChange: (vendorId: string, sku: string, price: number) => void }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -152,10 +238,13 @@ function VendorRow({ vendor }: { vendor: VendorData }) {
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-zinc-600 dark:text-zinc-400">
-                        {product.contractPrice > 0
-                          ? `$${product.contractPrice.toFixed(2)}`
-                          : "—"}
+                      <td className="px-4 py-3 text-right">
+                        <EditablePrice
+                          vendorId={vendor.id}
+                          productSku={product.productSku}
+                          value={product.contractPrice}
+                          onChange={(p) => onPriceChange(vendor.id, product.productSku, p)}
+                        />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-mono text-zinc-900 dark:text-zinc-100">
@@ -207,6 +296,21 @@ export default function VendorsPage() {
       .finally(() => setIsLoading(false));
   }, []);
 
+  const handlePriceChange = (vendorId: string, sku: string, newPrice: number) => {
+    setVendors((prev) =>
+      prev.map((v) =>
+        v.id === vendorId
+          ? {
+              ...v,
+              products: v.products.map((p) =>
+                p.productSku === sku ? { ...p, contractPrice: newPrice } : p
+              ),
+            }
+          : v
+      )
+    );
+  };
+
   return (
     <main className="min-h-screen bg-zinc-50 dark:bg-black p-4 md:p-8 lg:p-12 text-zinc-900 dark:text-zinc-50 font-sans">
       <div className="max-w-4xl mx-auto space-y-8">
@@ -234,6 +338,7 @@ export default function VendorsPage() {
           <p className="text-base text-zinc-500 dark:text-zinc-400 max-w-2xl">
             View all tracked vendors and their pricing baselines. Expand a row
             to see per-SKU contract prices, moving averages, and price trends.
+            Click any contract price to edit it.
           </p>
         </header>
 
@@ -259,7 +364,7 @@ export default function VendorsPage() {
         ) : (
           <div className="space-y-3">
             {vendors.map((vendor) => (
-              <VendorRow key={vendor.id} vendor={vendor} />
+              <VendorRow key={vendor.id} vendor={vendor} onPriceChange={handlePriceChange} />
             ))}
           </div>
         )}

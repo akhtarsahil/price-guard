@@ -28,11 +28,27 @@ export default function SetupPage() {
   const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
 
+  // Threshold state
+  const [priceHikeThreshold, setPriceHikeThreshold] = useState(5);
+  const [contractTolerance, setContractTolerance] = useState(0);
+  const [thresholdLoading, setThresholdLoading] = useState(true);
+  const [thresholdSaving, setThresholdSaving] = useState(false);
+  const [thresholdResult, setThresholdResult] = useState<{ success: boolean; message: string } | null>(null);
+
   useEffect(() => {
     fetch("/api/setup")
       .then((res) => res.json())
       .then((data: ServiceStatus) => setStatus(data))
       .catch(() => {});
+
+    fetch("/api/settings")
+      .then((res) => res.json())
+      .then((data) => {
+        setPriceHikeThreshold(data.priceHikeThreshold ?? 5);
+        setContractTolerance(data.contractTolerance ?? 0);
+      })
+      .catch(() => {})
+      .finally(() => setThresholdLoading(false));
   }, []);
 
   const stepIndex = STEPS.indexOf(currentStep);
@@ -58,6 +74,28 @@ export default function SetupPage() {
       setSaveResult({ success: false, message: e.message });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveThresholds = async () => {
+    setThresholdSaving(true);
+    setThresholdResult(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priceHikeThreshold, contractTolerance }),
+      });
+      if (res.ok) {
+        setThresholdResult({ success: true, message: "Thresholds saved successfully." });
+      } else {
+        const data = await res.json();
+        setThresholdResult({ success: false, message: data.error || "Failed to save" });
+      }
+    } catch (e: any) {
+      setThresholdResult({ success: false, message: e.message });
+    } finally {
+      setThresholdSaving(false);
     }
   };
 
@@ -90,7 +128,7 @@ export default function SetupPage() {
             Setup Wizard
           </h1>
           <p className="text-white/80 mt-2 text-lg">
-            Configure your backend services in under 2 minutes. Skip any you don't need yet.
+            Configure your backend services in under 2 minutes. Skip any you don&apos;t need yet.
           </p>
         </div>
       </div>
@@ -380,6 +418,81 @@ export default function SetupPage() {
             </div>
           )}
 
+        </div>
+
+        {/* ────────────────────────────────────────────────
+            Pricing Thresholds — always visible below wizard
+        ──────────────────────────────────────────────── */}
+        <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 md:p-8 shadow-sm mt-8">
+          <div className="flex items-center gap-3 mb-1">
+            <span className="text-2xl">📊</span>
+            <h2 className="text-xl font-bold">Pricing Thresholds</h2>
+          </div>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">
+            Configure the sensitivity of the price comparison engine. These thresholds determine when an invoice line item gets flagged.
+          </p>
+
+          {thresholdLoading ? (
+            <div className="h-20 rounded-lg bg-zinc-100 dark:bg-zinc-800 animate-pulse" />
+          ) : (
+            <div className="space-y-5">
+              <div>
+                <label className="flex items-center justify-between text-sm font-medium mb-1.5">
+                  <span>Price Hike Threshold</span>
+                  <span className="font-mono text-indigo-600 dark:text-indigo-400">{priceHikeThreshold}%</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="50"
+                  step="1"
+                  value={priceHikeThreshold}
+                  onChange={(e) => setPriceHikeThreshold(Number(e.target.value))}
+                  className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+                <p className="text-xs text-zinc-400 mt-1">
+                  Flag items whose price exceeds the moving average by this percentage. Default: 5%.
+                </p>
+              </div>
+
+              <div>
+                <label className="flex items-center justify-between text-sm font-medium mb-1.5">
+                  <span>Contract Tolerance</span>
+                  <span className="font-mono text-indigo-600 dark:text-indigo-400">{contractTolerance}%</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="25"
+                  step="1"
+                  value={contractTolerance}
+                  onChange={(e) => setContractTolerance(Number(e.target.value))}
+                  className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+                <p className="text-xs text-zinc-400 mt-1">
+                  Allow prices to exceed the contract price by this percentage before flagging. Default: 0% (strict).
+                </p>
+              </div>
+
+              {thresholdResult && (
+                <div className={`px-4 py-3 rounded-lg text-sm border ${
+                  thresholdResult.success
+                    ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
+                    : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+                }`}>
+                  {thresholdResult.success ? "✅ " : "❌ "}{thresholdResult.message}
+                </div>
+              )}
+
+              <button
+                onClick={handleSaveThresholds}
+                disabled={thresholdSaving}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                {thresholdSaving ? "Saving..." : "Save Thresholds"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </main>

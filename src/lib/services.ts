@@ -4,6 +4,8 @@ import {
   IPricingRepository,
   ICreditMemoRepository,
   IAuditLogRepository,
+  ISettingsRepository,
+  IPasswordRepository,
   INotificationService,
 } from "./interfaces";
 
@@ -36,6 +38,8 @@ function createRepos() {
       SupabasePricingRepository,
       SupabaseCreditMemoRepository,
       SupabaseAuditLogRepository,
+      SupabaseSettingsRepository,
+      SupabasePasswordRepository,
     } = require("./supabase-db");
 
     return {
@@ -44,6 +48,8 @@ function createRepos() {
       pricingRepo: new SupabasePricingRepository() as IPricingRepository,
       creditMemoRepo: new SupabaseCreditMemoRepository() as ICreditMemoRepository,
       auditLogRepo: new SupabaseAuditLogRepository() as IAuditLogRepository,
+      settingsRepo: new SupabaseSettingsRepository() as ISettingsRepository,
+      passwordRepo: new SupabasePasswordRepository() as IPasswordRepository,
     };
   }
 
@@ -54,6 +60,8 @@ function createRepos() {
     SQLitePricingRepository,
     SQLiteCreditMemoRepository,
     SQLiteAuditLogRepository,
+    SQLiteSettingsRepository,
+    SQLitePasswordRepository,
   } = require("./sqlite-db");
 
   return {
@@ -62,6 +70,8 @@ function createRepos() {
     pricingRepo: new SQLitePricingRepository() as IPricingRepository,
     creditMemoRepo: new SQLiteCreditMemoRepository() as ICreditMemoRepository,
     auditLogRepo: new SQLiteAuditLogRepository() as IAuditLogRepository,
+    settingsRepo: new SQLiteSettingsRepository() as ISettingsRepository,
+    passwordRepo: new SQLitePasswordRepository() as IPasswordRepository,
   };
 }
 
@@ -95,6 +105,8 @@ export function getInvoiceRepo(): IInvoiceRepository { return getRepos().invoice
 export function getPricingRepo(): IPricingRepository { return getRepos().pricingRepo; }
 export function getCreditMemoRepo(): ICreditMemoRepository { return getRepos().creditMemoRepo; }
 export function getAuditLogRepo(): IAuditLogRepository { return getRepos().auditLogRepo; }
+export function getSettingsRepo(): ISettingsRepository { return getRepos().settingsRepo; }
+export function getPasswordRepo(): IPasswordRepository { return getRepos().passwordRepo; }
 
 export function getNotificationService(): INotificationService {
   if (!_notificationService) _notificationService = createNotificationService();
@@ -110,3 +122,4 @@ export function getOCRClient(): AntigravityOCRClient {
 export function getActiveBackend(): "supabase" | "sqlite" {
   return hasSupabase ? "supabase" : "sqlite";
 }
+

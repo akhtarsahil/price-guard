@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOCRClient, getVendorRepo, getPricingRepo, getCreditMemoRepo, getAuditLogRepo } from "@/lib/services";
+import { getOCRClient, getVendorRepo, getPricingRepo, getCreditMemoRepo, getAuditLogRepo, getInvoiceRepo, getSettingsRepo } from "@/lib/services";
 import { extractRestaurantInvoiceData, RestaurantInvoice } from "@/lib/ocr";
 import { processInvoiceIngestion, InvoiceItem } from "@/lib/comparison";
 import { draftMemosForInvoice } from "@/lib/notifications";
@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
     const pricingRepo = getPricingRepo();
     const auditLogRepo = getAuditLogRepo();
     const invoiceId = `inv-${Date.now()}`;
+    const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
     const ingestedItems: InvoiceItem[] = invoiceData.items.map((item) => ({
       vendorId: vendorId,
       productSku: item.itemNameOrSku,
@@ -48,20 +49,36 @@ export async function POST(request: NextRequest) {
       totalAmount: item.totalAmount
     }));
 
-    // 3. Compare Prices against Database History (with full audit logging)
+    // 3. Read configurable threshold from settings
+    const settingsRepo = getSettingsRepo();
+    const settings = await settingsRepo.getSettings();
+
+    // 4. Compare Prices against Database History (with full audit logging)
     const ingestionSummary = await processInvoiceIngestion(
       ingestedItems,
       pricingRepo,
-      5, // 5% price hike threshold
+      settings.priceHikeThreshold,
       auditLogRepo,
       invoiceId
     );
 
-    // 4. Draft Credit Memos for flagged items
+    // 5. Save invoice to history
+    const invoiceRepo = getInvoiceRepo();
+    await invoiceRepo.saveInvoice({
+      id: invoiceId,
+      vendorId,
+      vendorName: invoiceData.vendorName,
+      invoiceNumber,
+      date: invoiceData.date || new Date().toISOString(),
+      totalAmount: invoiceData.totalAmount,
+      itemCount: invoiceData.items.length,
+      flaggedCount: ingestionSummary.flaggedItems.length,
+      items: invoiceData.items,
+    });
+
+    // 6. Draft Credit Memos for flagged items
     const creditMemoRepo = getCreditMemoRepo();
     if (ingestionSummary.flaggedItems.length > 0) {
-      const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
-      
       const newDrafts = await draftMemosForInvoice(
         invoiceNumber,
         ingestionSummary.flaggedItems,
@@ -84,3 +101,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
+

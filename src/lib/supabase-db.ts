@@ -5,9 +5,13 @@ import {
   IPricingRepository,
   ICreditMemoRepository,
   IAuditLogRepository,
+  ISettingsRepository,
+  IPasswordRepository,
   AuditLogEntry,
   Vendor,
-  Invoice
+  Invoice,
+  AppSettings,
+  DEFAULT_SETTINGS,
 } from "./interfaces";
 import { ProductPricing } from "./pricing";
 import { PendingCreditMemo } from "./notifications";
@@ -75,11 +79,34 @@ export class SupabaseInvoiceRepository extends SupabaseDatabase implements IInvo
     return {
       id: data.id,
       vendorId: data.vendor_id,
+      vendorName: data.vendor_name || "",
       invoiceNumber: data.invoice_number,
       date: data.date,
       totalAmount: data.total_amount,
+      itemCount: data.item_count || 0,
+      flaggedCount: data.flagged_count || 0,
       items: data.items
     };
+  }
+
+  async getAllInvoices(): Promise<Invoice[]> {
+    if (!this.supabase) return [];
+    const { data, error } = await this.supabase
+      .from('invoices')
+      .select('*')
+      .order('date', { ascending: false });
+    if (error || !data) return [];
+    return data.map((r: any) => ({
+      id: r.id,
+      vendorId: r.vendor_id,
+      vendorName: r.vendor_name || "",
+      invoiceNumber: r.invoice_number,
+      date: r.date,
+      totalAmount: r.total_amount,
+      itemCount: r.item_count || 0,
+      flaggedCount: r.flagged_count || 0,
+      items: r.items,
+    }));
   }
 }
 
@@ -139,6 +166,17 @@ export class SupabasePricingRepository extends SupabaseDatabase implements IPric
       contractPrice: r.contract_price,
       priceHistory: r.price_history || [],
     }));
+  }
+
+  async updateContractPrice(vendorId: string, productSku: string, contractPrice: number): Promise<void> {
+    if (!this.supabase) return;
+    const existing = await this.getHistoricalPricing(vendorId, productSku);
+    await this.supabase.from('product_pricing').upsert({
+      vendor_id: vendorId,
+      product_sku: productSku,
+      contract_price: contractPrice,
+      price_history: existing?.priceHistory || [],
+    }, { onConflict: 'vendor_id,product_sku' });
   }
 }
 
@@ -287,5 +325,39 @@ export class SupabaseAuditLogRepository extends SupabaseDatabase implements IAud
       thresholdApplied: r.threshold_applied,
       loggedAt: r.logged_at,
     }));
+  }
+}
+
+export class SupabaseSettingsRepository extends SupabaseDatabase implements ISettingsRepository {
+  async getSettings(): Promise<AppSettings> {
+    if (!this.supabase) return { ...DEFAULT_SETTINGS };
+    const { data } = await this.supabase.from('app_settings').select('value').eq('key', 'app').single();
+    if (!data) return { ...DEFAULT_SETTINGS };
+    try { return JSON.parse(data.value); } catch { return { ...DEFAULT_SETTINGS }; }
+  }
+
+  async saveSettings(settings: AppSettings): Promise<void> {
+    if (!this.supabase) return;
+    await this.supabase.from('app_settings').upsert({ key: 'app', value: JSON.stringify(settings) });
+  }
+}
+
+export class SupabasePasswordRepository extends SupabaseDatabase implements IPasswordRepository {
+  async getPasswordHash(): Promise<string> {
+    if (!this.supabase) {
+      if (process.env.ADMIN_PASSWORD_HASH) return process.env.ADMIN_PASSWORD_HASH;
+      const { hashPassword } = require("./auth");
+      return hashPassword("admin");
+    }
+    const { data } = await this.supabase.from('app_passwords').select('hash').eq('key', 'admin').single();
+    if (data) return data.hash;
+    if (process.env.ADMIN_PASSWORD_HASH) return process.env.ADMIN_PASSWORD_HASH;
+    const { hashPassword } = require("./auth");
+    return hashPassword("admin");
+  }
+
+  async setPasswordHash(hash: string): Promise<void> {
+    if (!this.supabase) return;
+    await this.supabase.from('app_passwords').upsert({ key: 'admin', hash });
   }
 }

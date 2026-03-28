@@ -6,14 +6,16 @@ import { UploadInvoice } from "@/components/UploadInvoice";
 import { AuditLog } from "@/components/AuditLog";
 import { StatsBar } from "@/components/StatsBar";
 import { MemoHistory } from "@/components/MemoHistory";
+import { InvoiceHistory } from "@/components/InvoiceHistory";
 import { PendingCreditMemo } from "@/lib/notifications";
-import { CheckSquare, ShieldCheck, Clock, LogOut } from "lucide-react";
+import { CheckSquare, ShieldCheck, Clock, FileText, LogOut } from "lucide-react";
 
 export default function Home() {
   const [drafts, setDrafts] = useState<PendingCreditMemo[]>([]);
   const [sentCount, setSentCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"approvals" | "auditor" | "history">("approvals");
+  const [activeTab, setActiveTab] = useState<"approvals" | "auditor" | "history" | "invoices">("approvals");
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Load drafts via API route
   const loadMemos = async () => {
@@ -35,6 +37,7 @@ export default function Home() {
 
   const handleUploadSuccess = () => {
     loadMemos();
+    setRefreshKey((k) => k + 1);
   };
 
   const handleApproveAndSend = async (id: string) => {
@@ -171,6 +174,17 @@ export default function Home() {
                   <Clock className="w-4 h-4" />
                   History
                </button>
+               <button
+                  onClick={() => setActiveTab("invoices")}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-4 text-sm font-medium rounded-lg transition-all ${
+                    activeTab === "invoices" 
+                      ? "bg-white dark:bg-black text-indigo-600 dark:text-indigo-400 shadow-sm" 
+                      : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                  Invoices
+               </button>
             </div>
 
             {/* Tab Content */}
@@ -183,8 +197,10 @@ export default function Home() {
                 />
               ) : activeTab === "auditor" ? (
                 <AuditLog />
-              ) : (
+              ) : activeTab === "history" ? (
                 <MemoHistory />
+              ) : (
+                <InvoiceHistory refreshKey={refreshKey} />
               )}
             </div>
 

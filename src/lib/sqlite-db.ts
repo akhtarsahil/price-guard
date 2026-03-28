@@ -18,9 +18,13 @@ import {
   IPricingRepository,
   ICreditMemoRepository,
   IAuditLogRepository,
+  ISettingsRepository,
+  IPasswordRepository,
   AuditLogEntry,
   Vendor,
   Invoice,
+  AppSettings,
+  DEFAULT_SETTINGS,
 } from "./interfaces";
 import { ProductPricing } from "./pricing";
 import { PendingCreditMemo } from "./notifications";
@@ -60,9 +64,12 @@ function initializeTables(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS invoices (
       id TEXT PRIMARY KEY,
       vendor_id TEXT REFERENCES vendors(id) ON DELETE CASCADE,
+      vendor_name TEXT DEFAULT '',
       invoice_number TEXT NOT NULL,
       date TEXT NOT NULL,
       total_amount REAL NOT NULL,
+      item_count INTEGER DEFAULT 0,
+      flagged_count INTEGER DEFAULT 0,
       items TEXT NOT NULL DEFAULT '[]'
     );
 
@@ -100,6 +107,16 @@ function initializeTables(db: Database.Database) {
       flag_type TEXT,
       threshold_applied TEXT NOT NULL,
       logged_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS app_passwords (
+      key TEXT PRIMARY KEY,
+      hash TEXT NOT NULL
     );
   `);
 }
@@ -225,13 +242,16 @@ export class SQLiteVendorRepository implements IVendorRepository {
 export class SQLiteInvoiceRepository implements IInvoiceRepository {
   async saveInvoice(invoice: Invoice): Promise<void> {
     getDb().prepare(
-      "INSERT OR REPLACE INTO invoices (id, vendor_id, invoice_number, date, total_amount, items) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO invoices (id, vendor_id, vendor_name, invoice_number, date, total_amount, item_count, flagged_count, items) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
       invoice.id,
       invoice.vendorId,
+      invoice.vendorName,
       invoice.invoiceNumber,
       invoice.date,
       invoice.totalAmount,
+      invoice.itemCount,
+      invoice.flaggedCount,
       JSON.stringify(invoice.items)
     );
   }
@@ -242,11 +262,31 @@ export class SQLiteInvoiceRepository implements IInvoiceRepository {
     return {
       id: row.id,
       vendorId: row.vendor_id,
+      vendorName: row.vendor_name || "",
       invoiceNumber: row.invoice_number,
       date: row.date,
       totalAmount: row.total_amount,
+      itemCount: row.item_count || 0,
+      flaggedCount: row.flagged_count || 0,
       items: JSON.parse(row.items),
     };
+  }
+
+  async getAllInvoices(): Promise<Invoice[]> {
+    const rows = getDb().prepare(
+      "SELECT * FROM invoices ORDER BY date DESC"
+    ).all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      vendorId: r.vendor_id,
+      vendorName: r.vendor_name || "",
+      invoiceNumber: r.invoice_number,
+      date: r.date,
+      totalAmount: r.total_amount,
+      itemCount: r.item_count || 0,
+      flaggedCount: r.flagged_count || 0,
+      items: JSON.parse(r.items),
+    }));
   }
 }
 
@@ -289,6 +329,14 @@ export class SQLitePricingRepository implements IPricingRepository {
       contractPrice: r.contract_price,
       priceHistory: JSON.parse(r.price_history),
     }));
+  }
+
+  async updateContractPrice(vendorId: string, productSku: string, contractPrice: number): Promise<void> {
+    const existing = await this.getHistoricalPricing(vendorId, productSku);
+    const history = existing?.priceHistory || [];
+    getDb().prepare(
+      "INSERT OR REPLACE INTO product_pricing (vendor_id, product_sku, contract_price, price_history) VALUES (?, ?, ?, ?)"
+    ).run(vendorId, productSku, contractPrice, JSON.stringify(history));
   }
 }
 
@@ -413,5 +461,35 @@ export class SQLiteAuditLogRepository implements IAuditLogRepository {
       thresholdApplied: r.threshold_applied,
       loggedAt: r.logged_at,
     }));
+  }
+}
+
+export class SQLiteSettingsRepository implements ISettingsRepository {
+  async getSettings(): Promise<AppSettings> {
+    const row = getDb().prepare("SELECT value FROM app_settings WHERE key = 'app'").get() as any;
+    if (!row) return { ...DEFAULT_SETTINGS };
+    try { return JSON.parse(row.value); } catch { return { ...DEFAULT_SETTINGS }; }
+  }
+
+  async saveSettings(settings: AppSettings): Promise<void> {
+    getDb().prepare(
+      "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('app', ?)"
+    ).run(JSON.stringify(settings));
+  }
+}
+
+export class SQLitePasswordRepository implements IPasswordRepository {
+  async getPasswordHash(): Promise<string> {
+    const row = getDb().prepare("SELECT hash FROM app_passwords WHERE key = 'admin'").get() as any;
+    if (row) return row.hash;
+    if (process.env.ADMIN_PASSWORD_HASH) return process.env.ADMIN_PASSWORD_HASH;
+    const { hashPassword } = require("./auth");
+    return hashPassword("admin");
+  }
+
+  async setPasswordHash(hash: string): Promise<void> {
+    getDb().prepare(
+      "INSERT OR REPLACE INTO app_passwords (key, hash) VALUES ('admin', ?)"
+    ).run(hash);
   }
 }

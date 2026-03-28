@@ -62,12 +62,8 @@ export function NotificationDashboard({ drafts, onApproveAndSend, onDismiss }: D
                 
                 <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2 font-medium uppercase tracking-wider">Preview Email</p>
-                  <div className="relative">
-                    <div className="text-xs font-mono text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 p-3 rounded-lg overflow-hidden line-clamp-4 leading-relaxed">
-                      {draft.compiledEmailBody}
-                    </div>
-                    {/* Fade out effect string */}
-                    <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-zinc-50 dark:from-zinc-900 to-transparent"></div>
+                  <div className="text-xs font-mono text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 p-3 rounded-lg max-h-40 overflow-y-auto leading-relaxed whitespace-pre-wrap">
+                    {draft.compiledEmailBody}
                   </div>
                 </div>
               </div>

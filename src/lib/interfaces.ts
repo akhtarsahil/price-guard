@@ -11,11 +11,24 @@ export interface Vendor {
 export interface Invoice {
   id: string;
   vendorId: string;
+  vendorName: string;
   invoiceNumber: string;
   date: string;
   totalAmount: number;
+  itemCount: number;
+  flaggedCount: number;
   items: unknown[]; // Could be typed further if needed
 }
+
+export interface AppSettings {
+  priceHikeThreshold: number;   // % above moving avg to flag (default 5)
+  contractTolerance: number;    // % above contract price to flag (default 0)
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  priceHikeThreshold: 5,
+  contractTolerance: 0,
+};
 
 export interface IVendorRepository {
   getVendorById(id: string): Promise<Vendor | null>;
@@ -26,12 +39,14 @@ export interface IVendorRepository {
 export interface IInvoiceRepository {
   saveInvoice(invoice: Invoice): Promise<void>;
   getInvoiceById(id: string): Promise<Invoice | null>;
+  getAllInvoices(): Promise<Invoice[]>;
 }
 
 export interface IPricingRepository {
   getHistoricalPricing(vendorId: string, productSku: string): Promise<ProductPricing | null>;
   appendPrice(vendorId: string, productSku: string, price: number, date?: string): Promise<void>;
   getPricingByVendor(vendorId: string): Promise<ProductPricing[]>;
+  updateContractPrice(vendorId: string, productSku: string, contractPrice: number): Promise<void>;
 }
 
 export interface ICreditMemoRepository {
@@ -64,6 +79,17 @@ export interface IAuditLogRepository {
   getRecentEntries(limit?: number): Promise<AuditLogEntry[]>;
 }
 
+export interface ISettingsRepository {
+  getSettings(): Promise<AppSettings>;
+  saveSettings(settings: AppSettings): Promise<void>;
+}
+
+export interface IPasswordRepository {
+  getPasswordHash(): Promise<string>;
+  setPasswordHash(hash: string): Promise<void>;
+}
+
 export interface INotificationService {
   sendCreditMemo(memo: PendingCreditMemo): Promise<boolean>;
 }
+
