@@ -11,13 +11,13 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). Default login password is `admin`.
 
-Then visit [http://localhost:3000/setup](http://localhost:3000/setup) (or click **⚙ Setup** in the top-right corner of the dashboard) to launch the **Setup Wizard** — a guided, in-app configuration tool that walks you through connecting your own API keys.
+Then visit [http://localhost:3000/setup](http://localhost:3000/setup) (or click **⚙ Setup** in the top-right corner of the dashboard) to launch the **Setup Wizard**. It's a guided (in-app) configuration tool that will walk you through connecting your API keys.
 
 ---
 
 ## Authentication
 
-The app is password-protected. On first run the default password is `admin`.
+The app is password-protected. On first run the default password is `admin`(without the 's)
 
 ### Changing the Password
 
