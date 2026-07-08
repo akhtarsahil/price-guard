@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import Decimal from "decimal.js";
 import {
   CheckCircle,
   XCircle,
@@ -10,27 +10,10 @@ import {
   Server,
   Download,
 } from "lucide-react";
-
-interface HistoryMemo {
-  id: string;
-  vendorName: string;
-  invoiceNumber: string;
-  status: "APPROVED" | "SENT" | "DISMISSED";
-  createdAt: string;
-  flaggedItems: { leakage: number }[];
-}
+import { useMemoHistory } from "@/hooks/queries";
 
 export function MemoHistory() {
-  const [memos, setMemos] = useState<HistoryMemo[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/memos/history")
-      .then((res) => res.json())
-      .then((data) => setMemos(data.memos || []))
-      .catch(console.error)
-      .finally(() => setIsLoading(false));
-  }, []);
+  const { data: memos = [], isLoading } = useMemoHistory();
 
   if (isLoading) {
     return (
@@ -54,6 +37,12 @@ export function MemoHistory() {
   }
 
   const statusConfig = {
+    DRAFT: {
+      icon: Clock,
+      label: "Draft",
+      color:
+        "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800",
+    },
     APPROVED: {
       icon: CheckCircle,
       label: "Approved",
@@ -95,12 +84,11 @@ export function MemoHistory() {
 
       <div className="grid gap-4 grid-cols-1">
         {memos.map((memo) => {
-          const config = statusConfig[memo.status];
+          const config = statusConfig[memo.status] || statusConfig.APPROVED;
           const StatusIcon = config.icon;
-          const totalLeakage = memo.flaggedItems.reduce(
-            (acc, item) => acc + item.leakage,
-            0
-          );
+          const totalLeakage = memo.flaggedItems
+            .reduce((acc, item) => acc.plus(item.leakage), new Decimal(0))
+            .toFixed(2);
           const date = new Date(memo.createdAt);
 
           return (
@@ -132,7 +120,7 @@ export function MemoHistory() {
               {/* Amount */}
               <div className="shrink-0 text-right">
                 <span className="text-sm font-mono font-semibold text-zinc-900 dark:text-zinc-100">
-                  ${totalLeakage.toFixed(2)}
+                  ${totalLeakage}
                 </span>
                 <div className="text-[10px] text-zinc-400 mt-0.5">
                   {date.toLocaleDateString()}

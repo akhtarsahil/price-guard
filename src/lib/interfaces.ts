@@ -1,5 +1,4 @@
 import { ProductPricing } from "./pricing";
-import { ComparisonResult } from "./comparison";
 import { PendingCreditMemo } from "./notifications";
 
 export interface Vendor {
@@ -14,7 +13,7 @@ export interface Invoice {
   vendorName: string;
   invoiceNumber: string;
   date: string;
-  totalAmount: number;
+  totalAmount: number | string;
   itemCount: number;
   flaggedCount: number;
   items: unknown[]; // Could be typed further if needed
@@ -44,7 +43,7 @@ export interface IInvoiceRepository {
 
 export interface IPricingRepository {
   getHistoricalPricing(vendorId: string, productSku: string): Promise<ProductPricing | null>;
-  appendPrice(vendorId: string, productSku: string, price: number, date?: string): Promise<void>;
+  appendPrice(vendorId: string, productSku: string, price: number | string, date?: string): Promise<void>;
   getPricingByVendor(vendorId: string): Promise<ProductPricing[]>;
   updateContractPrice(vendorId: string, productSku: string, contractPrice: number): Promise<void>;
 }
@@ -53,7 +52,7 @@ export interface ICreditMemoRepository {
   getPendingMemos(): Promise<PendingCreditMemo[]>;
   getMemoById(id: string): Promise<PendingCreditMemo | null>;
   saveDraft(memo: PendingCreditMemo): Promise<void>;
-  updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED"): Promise<void>;
+  updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED", reason?: string): Promise<void>;
   getAllMemos(): Promise<PendingCreditMemo[]>;
 }
 
@@ -63,11 +62,11 @@ export interface AuditLogEntry {
   lineItemIndex: number;
   vendorId: string;
   itemSku: string;
-  billedPrice: number;
-  referencePrice: number;
+  billedPrice: number | string;
+  referencePrice: number | string;
   referenceType: "contract" | "moving_avg" | "none";
-  variancePct: number;
-  overcharge: number;
+  variancePct: number | string;
+  overcharge: number | string;
   flagType: string | null;
   thresholdApplied: string;
   loggedAt: string;

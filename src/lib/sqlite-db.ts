@@ -90,7 +90,8 @@ function initializeTables(db: Database.Database) {
       flagged_items TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL DEFAULT 'DRAFT',
       created_at TEXT NOT NULL,
-      compiled_email_body TEXT
+      compiled_email_body TEXT,
+      resolution_reason TEXT
     );
 
     CREATE TABLE IF NOT EXISTS variance_audit_log (
@@ -119,6 +120,12 @@ function initializeTables(db: Database.Database) {
       hash TEXT NOT NULL
     );
   `);
+
+  try {
+    db.exec("ALTER TABLE credit_memos ADD COLUMN resolution_reason TEXT;");
+  } catch {
+    // Column already exists
+  }
 }
 
 /**
@@ -305,11 +312,11 @@ export class SQLitePricingRepository implements IPricingRepository {
     };
   }
 
-  async appendPrice(vendorId: string, productSku: string, price: number, date: string = new Date().toISOString()): Promise<void> {
+  async appendPrice(vendorId: string, productSku: string, price: number | string, date: string = new Date().toISOString()): Promise<void> {
     const existing = await this.getHistoricalPricing(vendorId, productSku);
 
     let history = existing?.priceHistory || [];
-    history.push({ price, date });
+    history.push({ price: String(price), date });
     if (history.length > 5) {
       history = history.slice(-5);
     }
@@ -352,6 +359,7 @@ export class SQLiteCreditMemoRepository implements ICreditMemoRepository {
       status: row.status,
       createdAt: row.created_at,
       compiledEmailBody: row.compiled_email_body,
+      resolutionReason: row.resolution_reason,
     };
   }
 
@@ -370,7 +378,7 @@ export class SQLiteCreditMemoRepository implements ICreditMemoRepository {
 
   async saveDraft(memo: PendingCreditMemo): Promise<void> {
     getDb().prepare(
-      "INSERT OR REPLACE INTO credit_memos (id, vendor_id, vendor_name, vendor_email, invoice_number, flagged_items, status, created_at, compiled_email_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO credit_memos (id, vendor_id, vendor_name, vendor_email, invoice_number, flagged_items, status, created_at, compiled_email_body, resolution_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
       memo.id,
       memo.vendorId,
@@ -380,12 +388,17 @@ export class SQLiteCreditMemoRepository implements ICreditMemoRepository {
       JSON.stringify(memo.flaggedItems),
       memo.status,
       memo.createdAt,
-      memo.compiledEmailBody
+      memo.compiledEmailBody,
+      memo.resolutionReason || null
     );
   }
 
-  async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED"): Promise<void> {
-    getDb().prepare("UPDATE credit_memos SET status = ? WHERE id = ?").run(status, id);
+  async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED", reason?: string): Promise<void> {
+    if (reason) {
+      getDb().prepare("UPDATE credit_memos SET status = ?, resolution_reason = ? WHERE id = ?").run(status, reason, id);
+    } else {
+      getDb().prepare("UPDATE credit_memos SET status = ? WHERE id = ?").run(status, id);
+    }
   }
 
   async getAllMemos(): Promise<PendingCreditMemo[]> {

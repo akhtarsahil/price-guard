@@ -18,7 +18,7 @@ export async function GET() {
 
     const rows = memos.map((m) => {
       const totalLeakage = m.flaggedItems
-        .reduce((acc, item) => acc + item.leakage, 0)
+        .reduce((acc, item) => acc + Number(item.leakage ?? item.overchargeAmount ?? 0), 0)
         .toFixed(2);
 
       return [

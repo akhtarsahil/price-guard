@@ -1,3 +1,4 @@
+import Decimal from "decimal.js";
 import { ComparisonResult } from "./comparison";
 import { IVendorRepository } from "./interfaces";
 
@@ -11,6 +12,7 @@ export interface PendingCreditMemo {
   status: "DRAFT" | "APPROVED" | "SENT";
   createdAt: string;
   compiledEmailBody?: string;
+  resolutionReason?: string;
 }
 
 /**
@@ -40,25 +42,25 @@ We are writing to you regarding a review of our recent invoice (Invoice #${invoi
 Please see the breakdown below for the specific items in question:
 `;
 
-  let totalCreditRequested = 0;
+  let totalCreditRequested = new Decimal(0);
 
   flags.forEach((flag) => {
     emailBody += `\n- Item/SKU: ${flag.productSku}\n`;
-    emailBody += `  Billed Price: $${flag.newUnitPrice.toFixed(2)}\n`;
+    emailBody += `  Billed Price: $${new Decimal(flag.newUnitPrice || 0).toFixed(2)}\n`;
     
-    if (flag.contractPrice > 0) {
-      emailBody += `  Contracted Price: $${flag.contractPrice.toFixed(2)}\n`;
+    if (new Decimal(flag.contractPrice || 0).gt(0)) {
+      emailBody += `  Contracted Price: $${new Decimal(flag.contractPrice || 0).toFixed(2)}\n`;
     } else {
-      emailBody += `  Historical Moving Average: $${flag.oldMovingAverage.toFixed(2)}\n`;
+      emailBody += `  Historical Moving Average: $${new Decimal(flag.oldMovingAverage || 0).toFixed(2)}\n`;
     }
 
-    emailBody += `  Variance (Leakage): $${flag.leakage.toFixed(2)}\n`;
+    emailBody += `  Variance (Leakage): $${new Decimal(flag.leakage).toFixed(2)}\n`;
     
     flag.flags.forEach(f => {
       emailBody += `  * ${f.message}\n`;
     });
 
-    totalCreditRequested += flag.leakage;
+    totalCreditRequested = totalCreditRequested.plus(flag.leakage);
   });
 
   emailBody += `
@@ -88,8 +90,9 @@ export async function draftMemosForInvoice(
   
   // Group flagged items by vendorId
   const vendorGroups = flaggedItems.reduce((acc, item) => {
-    if (!acc[item.vendorId]) acc[item.vendorId] = [];
-    acc[item.vendorId].push(item);
+    const vid = item.vendorId || "unknown";
+    if (!acc[vid]) acc[vid] = [];
+    acc[vid].push(item);
     return acc;
   }, {} as Record<string, ComparisonResult[]>);
 

@@ -2,6 +2,8 @@
 
 Intelligent AP Pricing & Monitoring. Automatically scan invoices via AI OCR, detect pricing leakage, and trigger credit memos in one click.
 
+Currently, the engine relies on exact text matching. The next iteration will implement an automated Vendor SKU-to-Internal Item Master mapping table to handle supplier naming variations.
+
 ## Quick Start (Local Development)
 
 ```bash

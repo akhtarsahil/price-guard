@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Search, Filter, AlertCircle, CheckCircle2, Server, Download } from "lucide-react";
 
 export interface AuditLogEntry {
@@ -19,27 +19,12 @@ export interface AuditLogEntry {
   loggedAt: string;
 }
 
+import { useAuditLog } from "@/hooks/queries";
+
 export function AuditLog() {
-  const [entries, setEntries] = useState<AuditLogEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: entries = [], isLoading } = useAuditLog(200);
   const [searchTerm, setSearchTerm] = useState("");
   const [flaggedOnly, setFlaggedOnly] = useState(false);
-
-  useEffect(() => {
-    const fetchLogs = async () => {
-      setIsLoading(true);
-      try {
-        const res = await fetch("/api/audit-log?limit=200");
-        const data = await res.json();
-        setEntries(data.entries || []);
-      } catch (err) {
-        console.error("Failed to load audit logs:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchLogs();
-  }, []);
 
   const filteredEntries = entries.filter((entry) => {
     const matchesSearch =
@@ -153,21 +138,21 @@ export function AuditLog() {
                         <div className="text-[10px] text-zinc-400 font-normal mt-0.5">{entry.invoiceId}</div>
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-zinc-900 dark:text-zinc-100">
-                        \${entry.billedPrice.toFixed(2)}
+                        \${Number(entry.billedPrice).toFixed(2)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-zinc-500 dark:text-zinc-400">
-                        \${entry.referencePrice.toFixed(2)}
+                        \${Number(entry.referencePrice).toFixed(2)}
                         <span className="text-[10px] block mt-0.5 uppercase tracking-wider">{entry.referenceType === 'contract' ? 'Fixed' : 'Avg'}</span>
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                          entry.variancePct > 0 
+                          Number(entry.variancePct) > 0 
                             ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' 
-                            : entry.variancePct < 0 
+                            : Number(entry.variancePct) < 0 
                               ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'
                               : 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300'
                         }`}>
-                          {entry.variancePct > 0 ? '+' : ''}{entry.variancePct.toFixed(1)}%
+                          {Number(entry.variancePct) > 0 ? '+' : ''}{Number(entry.variancePct).toFixed(1)}%
                         </span>
                       </td>
                       <td className="px-4 py-3 text-xs text-zinc-600 dark:text-zinc-400 max-w-[200px] truncate" title={entry.thresholdApplied}>

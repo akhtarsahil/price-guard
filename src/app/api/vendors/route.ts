@@ -15,7 +15,7 @@ export async function GET() {
         const products = pricing.map((p) => ({
           productSku: p.productSku,
           contractPrice: p.contractPrice,
-          movingAverage: Number(calculateMovingAverage(p).toFixed(2)),
+          movingAverage: calculateMovingAverage(p).toFixed(2),
           priceHistory: p.priceHistory,
         }));
 
@@ -34,5 +34,24 @@ export async function GET() {
       { error: "Failed to fetch vendors" },
       { status: 500 }
     );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const { name, email } = await request.json();
+    if (!name) {
+      return NextResponse.json({ error: "Vendor name is required" }, { status: 400 });
+    }
+
+    const vendorRepo = getVendorRepo();
+    const id = `v-${Date.now()}`;
+    const vendor = { id, name, email: email || "" };
+    
+    await vendorRepo.saveVendor(vendor);
+    return NextResponse.json(vendor);
+  } catch (error) {
+    console.error("Failed to save vendor:", error);
+    return NextResponse.json({ error: "Failed to save vendor" }, { status: 500 });
   }
 }

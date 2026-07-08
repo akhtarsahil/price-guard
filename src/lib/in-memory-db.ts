@@ -184,7 +184,7 @@ export class InMemoryPricingRepository implements IPricingRepository {
     return this.pricingData.get(key) || null;
   }
 
-  async appendPrice(vendorId: string, productSku: string, price: number, date: string = new Date().toISOString()): Promise<void> {
+  async appendPrice(vendorId: string, productSku: string, price: number | string, date: string = new Date().toISOString()): Promise<void> {
     const key = `${vendorId}-${productSku}`;
     let existing = this.pricingData.get(key);
     
@@ -192,7 +192,7 @@ export class InMemoryPricingRepository implements IPricingRepository {
       existing = { vendorId, productSku, contractPrice: 0, priceHistory: [] };
     }
     
-    existing.priceHistory.push({ price, date });
+    existing.priceHistory.push({ price: String(price), date });
     if (existing.priceHistory.length > 5) {
       existing.priceHistory = existing.priceHistory.slice(-5);
     }
@@ -240,10 +240,11 @@ export class InMemoryCreditMemoRepository implements ICreditMemoRepository {
     persistSave("creditMemos", this.memos);
   }
 
-  async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED"): Promise<void> {
+  async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED", reason?: string): Promise<void> {
     const memo = this.memos.get(id);
     if (memo) {
       (memo.status as any) = status;
+      if (reason) memo.resolutionReason = reason;
       persistSave("creditMemos", this.memos);
     }
   }

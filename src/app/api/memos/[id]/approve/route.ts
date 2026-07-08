@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCreditMemoRepo, getNotificationService } from "@/lib/services";
+import { COOKIE_NAME, decodeSessionToken } from "@/lib/auth";
 
 /**
  * POST /api/memos/[id]/approve
@@ -10,6 +11,23 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const sessionCookie = request.cookies.get(COOKIE_NAME);
+    const { valid, role } = await decodeSessionToken(sessionCookie?.value || "");
+    if (!valid || role === "AP_CLERK") {
+      return NextResponse.json(
+        { error: "Forbidden: AP Clerk role is read-only for approvals." },
+        { status: 403 }
+      );
+    }
+
+    let reasonCode: string | undefined;
+    try {
+      const body = await request.json();
+      reasonCode = body?.reasonCode || body?.reason || body?.resolution_reason;
+    } catch {
+      // Body may be empty or not JSON
+    }
+
     const { id } = await params;
     const creditMemoRepo = getCreditMemoRepo();
     const notificationService = getNotificationService();
@@ -22,7 +40,7 @@ export async function POST(
     const success = await notificationService.sendCreditMemo(memo);
 
     if (success) {
-      await creditMemoRepo.updateMemoStatus(id, "SENT");
+      await creditMemoRepo.updateMemoStatus(id, "SENT", reasonCode);
       return NextResponse.json({ success: true, message: "Credit memo approved and sent." });
     }
 

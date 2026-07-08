@@ -1,4 +1,5 @@
 import { z } from "zod";
+import Decimal from "decimal.js";
 
 // Hypothetical interface representing the Antigravity OCR Library
 export interface OCRImage {
@@ -20,15 +21,15 @@ export interface AntigravityOCRClient {
 export const InvoiceItemSchema = z.object({
   itemNameOrSku: z.string().describe("The name or SKU of the restaurant item purchased. Handle tables or list formats."),
   quantity: z.number().describe("The quantity of the item."),
-  unitPrice: z.number().describe("The price per unit of the item."),
-  totalAmount: z.number().describe("The total price for this line item."),
+  unitPrice: z.union([z.number(), z.string()]).transform((val) => new Decimal(val).toFixed(2)).describe("The price per unit of the item."),
+  totalAmount: z.union([z.number(), z.string()]).transform((val) => new Decimal(val).toFixed(2)).describe("The total price for this line item."),
 });
 
 export const RestaurantInvoiceSchema = z.object({
   vendorName: z.string().describe("The name of the restaurant or vendor."),
   date: z.string().describe("The date of the invoice (ISO format YYYY-MM-DD preferred)."),
   items: z.array(InvoiceItemSchema).describe("List of items in the invoice, correctly identifying table columns vs list formats."),
-  totalAmount: z.number().describe("The overall total amount of the invoice."),
+  totalAmount: z.union([z.number(), z.string()]).transform((val) => new Decimal(val).toFixed(2)).describe("The overall total amount of the invoice."),
 });
 
 export type RestaurantInvoice = z.infer<typeof RestaurantInvoiceSchema>;

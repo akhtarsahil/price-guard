@@ -2,13 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { DollarSign, Clock, FileSearch, AlertTriangle } from "lucide-react";
-
-interface Stats {
-  totalSavings: number;
-  pendingRecovery: number;
-  invoicesScanned: number;
-  flagRate: number;
-}
+import { useStats } from "@/hooks/queries";
 
 function useCountUp(target: number = 0, duration: number = 1200, decimals: number = 0): number {
   const [value, setValue] = useState(0);
@@ -117,16 +111,9 @@ function StatCard({
 }
 
 export function StatsBar() {
-  const [stats, setStats] = useState<Stats | null>(null);
+  const { data: stats, isLoading } = useStats();
 
-  useEffect(() => {
-    fetch("/api/stats")
-      .then((res) => res.json())
-      .then(setStats)
-      .catch(console.error);
-  }, []);
-
-  if (!stats) {
+  if (isLoading || !stats) {
     return (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[0, 1, 2, 3].map((i) => (
@@ -144,7 +131,7 @@ export function StatsBar() {
       <StatCard
         icon={DollarSign}
         label="Total Savings"
-        value={stats.totalSavings}
+        value={Number(stats.totalSavings)}
         prefix="$"
         color="emerald"
         delay={0}
@@ -152,7 +139,7 @@ export function StatsBar() {
       <StatCard
         icon={Clock}
         label="Pending Recovery"
-        value={stats.pendingRecovery}
+        value={Number(stats.pendingRecovery)}
         prefix="$"
         color="amber"
         delay={100}
@@ -160,14 +147,14 @@ export function StatsBar() {
       <StatCard
         icon={FileSearch}
         label="Invoices Scanned"
-        value={stats.invoicesScanned}
+        value={Number(stats.invoicesScanned)}
         color="indigo"
         delay={200}
       />
       <StatCard
         icon={AlertTriangle}
         label="Flag Rate"
-        value={stats.flagRate}
+        value={Number(stats.flagRate)}
         suffix="%"
         color="rose"
         delay={300}

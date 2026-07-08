@@ -1,34 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
 import { FileText, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import { useInvoices } from "@/hooks/queries";
 
-interface InvoiceRecord {
-  id: string;
-  vendorId: string;
-  vendorName: string;
-  invoiceNumber: string;
-  date: string;
-  totalAmount: number;
-  itemCount: number;
-  flaggedCount: number;
-}
-
-interface InvoiceHistoryProps {
-  refreshKey: number;
-}
-
-export function InvoiceHistory({ refreshKey }: InvoiceHistoryProps) {
-  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    fetch("/api/invoices")
-      .then((r) => r.json())
-      .then((data) => setInvoices(data))
-      .catch(() => setInvoices([]))
-      .finally(() => setLoading(false));
-  }, [refreshKey]);
+export function InvoiceHistory() {
+  const { data: invoices = [], isLoading: loading } = useInvoices();
 
   if (loading) {
     return (
@@ -87,7 +62,7 @@ export function InvoiceHistory({ refreshKey }: InvoiceHistoryProps) {
               </span>
             )}
             <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              ${inv.totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              ${Number(inv.totalAmount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>

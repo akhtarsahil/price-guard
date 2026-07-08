@@ -1,52 +1,37 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { NotificationDashboard } from "@/components/Dashboard";
 import { UploadInvoice } from "@/components/UploadInvoice";
 import { AuditLog } from "@/components/AuditLog";
 import { StatsBar } from "@/components/StatsBar";
 import { MemoHistory } from "@/components/MemoHistory";
 import { InvoiceHistory } from "@/components/InvoiceHistory";
-import { PendingCreditMemo } from "@/lib/notifications";
 import { CheckSquare, ShieldCheck, Clock, FileText, LogOut } from "lucide-react";
+import {
+  usePendingMemos,
+  useApproveMemo,
+  useDismissMemo,
+  useInvalidateDashboard,
+} from "@/hooks/queries";
 
 export default function Home() {
-  const [drafts, setDrafts] = useState<PendingCreditMemo[]>([]);
+  const { data: drafts = [], isLoading } = usePendingMemos();
+  const approveMutation = useApproveMemo();
+  const dismissMutation = useDismissMemo();
+  const invalidateDashboard = useInvalidateDashboard();
+
   const [sentCount, setSentCount] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"approvals" | "auditor" | "history" | "invoices">("approvals");
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  // Load drafts via API route
-  const loadMemos = async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch("/api/memos");
-      const data = await res.json();
-      setDrafts(data.memos || []);
-    } catch (err) {
-      console.error("Failed to load memos:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadMemos();
-  }, []);
 
   const handleUploadSuccess = () => {
-    loadMemos();
-    setRefreshKey((k) => k + 1);
+    invalidateDashboard();
   };
 
-  const handleApproveAndSend = async (id: string) => {
+  const handleApproveAndSend = async (id: string, reasonCode?: string) => {
     try {
-      const res = await fetch(`/api/memos/${id}/approve`, { method: "POST" });
-      const data = await res.json();
-
-      if (data.success) {
-        setDrafts((prev) => prev.filter((d) => d.id !== id));
+      const result = await approveMutation.mutateAsync({ id, reasonCode });
+      if (result.success) {
         setSentCount((prev) => prev + 1);
       }
     } catch (err) {
@@ -56,12 +41,7 @@ export default function Home() {
 
   const handleDismiss = async (id: string) => {
     try {
-      const res = await fetch(`/api/memos/${id}/dismiss`, { method: "POST" });
-      const data = await res.json();
-
-      if (data.success) {
-        setDrafts((prev) => prev.filter((d) => d.id !== id));
-      }
+      await dismissMutation.mutateAsync(id);
     } catch (err) {
       console.error("Failed to dismiss memo:", err);
     }
@@ -85,7 +65,7 @@ export default function Home() {
             rel="noopener noreferrer"
             className="text-xs font-medium text-zinc-400 dark:text-zinc-500 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors max-w-max"
           >
-            Akhtar
+            ShoreStar Solutions
           </a>
           <div className="flex items-center justify-between">
             <h1 className="text-3xl font-extrabold tracking-tight lg:text-4xl text-transparent bg-clip-text bg-gradient-to-r from-zinc-900 to-zinc-500 dark:from-white dark:to-zinc-500">
@@ -200,7 +180,7 @@ export default function Home() {
               ) : activeTab === "history" ? (
                 <MemoHistory />
               ) : (
-                <InvoiceHistory refreshKey={refreshKey} />
+                <InvoiceHistory />
               )}
             </div>
 

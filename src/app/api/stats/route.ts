@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import Decimal from "decimal.js";
 import { getAuditLogRepo, getCreditMemoRepo } from "@/lib/services";
 
 export async function GET() {
@@ -18,21 +19,21 @@ export async function GET() {
     );
     const totalSavings = resolvedMemos.reduce((sum, memo) => {
       const memoLeakage = memo.flaggedItems.reduce(
-        (acc, item) => acc + item.leakage,
-        0
+        (acc, item) => acc.plus(item.leakage ?? item.overchargeAmount ?? 0),
+        new Decimal(0)
       );
-      return sum + memoLeakage;
-    }, 0);
+      return sum.plus(memoLeakage);
+    }, new Decimal(0));
 
     // 2. Pending Recovery — sum of overcharge on DRAFT memos
     const draftMemos = allMemos.filter((m) => m.status === "DRAFT");
     const pendingRecovery = draftMemos.reduce((sum, memo) => {
       const memoLeakage = memo.flaggedItems.reduce(
-        (acc, item) => acc + item.leakage,
-        0
+        (acc, item) => acc.plus(item.leakage ?? item.overchargeAmount ?? 0),
+        new Decimal(0)
       );
-      return sum + memoLeakage;
-    }, 0);
+      return sum.plus(memoLeakage);
+    }, new Decimal(0));
 
     // 3. Invoices Scanned — unique invoice IDs from audit log
     const uniqueInvoices = new Set(auditEntries.map((e) => e.invoiceId));
@@ -42,14 +43,14 @@ export async function GET() {
     const flaggedCount = auditEntries.filter((e) => e.flagType !== null).length;
     const flagRate =
       auditEntries.length > 0
-        ? Number(((flaggedCount / auditEntries.length) * 100).toFixed(1))
-        : 0;
+        ? new Decimal(flaggedCount).dividedBy(auditEntries.length).times(100)
+        : new Decimal(0);
 
     return NextResponse.json({
-      totalSavings: Number(totalSavings.toFixed(2)),
-      pendingRecovery: Number(pendingRecovery.toFixed(2)),
+      totalSavings: totalSavings.toFixed(2),
+      pendingRecovery: pendingRecovery.toFixed(2),
       invoicesScanned,
-      flagRate,
+      flagRate: flagRate.toFixed(1),
     });
   } catch (error) {
     console.error("Failed to compute stats:", error);

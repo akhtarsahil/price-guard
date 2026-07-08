@@ -62,30 +62,58 @@ async function hmacSign(payload: string): Promise<string> {
     .join("");
 }
 
-export async function createSessionToken(): Promise<string> {
+export type UserRole = "AP_CLERK" | "CONTROLLER";
+
+export interface SessionPayload {
+  valid: boolean;
+  role: UserRole | null;
+}
+
+export async function createSessionToken(role: UserRole = "CONTROLLER"): Promise<string> {
   const expires = Date.now() + SESSION_MAX_AGE * 1000;
-  const payload = `authenticated:${expires}`;
+  const payload = `${role}:${expires}`;
   const sig = await hmacSign(payload);
   return `${payload}.${sig}`;
 }
 
-export async function verifySessionToken(token: string): Promise<boolean> {
+export async function decodeSessionToken(token: string): Promise<SessionPayload> {
   const lastDot = token.lastIndexOf(".");
-  if (lastDot === -1) return false;
+  if (lastDot === -1) return { valid: false, role: null };
 
   const payload = token.substring(0, lastDot);
   const sig = token.substring(lastDot + 1);
 
   // Verify signature
   const expectedSig = await hmacSign(payload);
-  if (sig !== expectedSig) return false;
+  if (sig !== expectedSig) return { valid: false, role: null };
 
-  // Check expiry
+  // Check expiry & role
   const parts = payload.split(":");
-  const expires = parseInt(parts[1], 10);
-  if (isNaN(expires) || Date.now() > expires) return false;
+  if (parts.length < 2) return { valid: false, role: null };
 
-  return true;
+  const roleOrAuth = parts[0];
+  const expires = parseInt(parts[1], 10);
+  if (isNaN(expires) || Date.now() > expires) return { valid: false, role: null };
+
+  let role: UserRole = "CONTROLLER";
+  if (roleOrAuth === "AP_CLERK") {
+    role = "AP_CLERK";
+  } else if (roleOrAuth === "CONTROLLER" || roleOrAuth === "authenticated") {
+    role = "CONTROLLER";
+  }
+
+  return { valid: true, role };
+}
+
+export async function verifySessionToken(token: string): Promise<boolean> {
+  const decoded = await decodeSessionToken(token);
+  return decoded.valid;
+}
+
+export async function getSessionRoleFromCookie(cookieValue?: string): Promise<UserRole | null> {
+  if (!cookieValue) return null;
+  const decoded = await decodeSessionToken(cookieValue);
+  return decoded.valid ? decoded.role : null;
 }
 
 export { COOKIE_NAME, SESSION_MAX_AGE };

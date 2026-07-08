@@ -1,4 +1,5 @@
 import { z } from "zod";
+import Decimal from "decimal.js";
 
 // -----------------------------------------------------------------------------
 // Database Schema Definitions
@@ -15,7 +16,7 @@ import { z } from "zod";
 // }
 
 export const PriceEntrySchema = z.object({
-  price: z.number().describe("The price paid for the item."),
+  price: z.string().describe("The price paid for the item."),
   date: z.string().describe("ISO date string of when this price was paid."),
 });
 
@@ -39,20 +40,20 @@ export type ProductPricing = z.infer<typeof ProductPricingSchema>;
  * Calculates the Moving Average Price for a given product based on its recent history.
  * 
  * @param pricing Record containing the price history and contract baseline.
- * @returns The calculated moving average (up to the last 5 prices).
+ * @returns The calculated moving average as a Decimal instance.
  */
-export function calculateMovingAverage(pricing: ProductPricing): number {
+export function calculateMovingAverage(pricing: ProductPricing): Decimal {
   if (!pricing.priceHistory || pricing.priceHistory.length === 0) {
     // If no history exists, we can default to the contract price as the baseline expectation
-    return pricing.contractPrice || 0;
+    return new Decimal(pricing.contractPrice || 0);
   }
 
   // Ensure we are only calculating the moving average of the *last 5* prices
   // (Schema enforces this, but slicing ensures logic safety if raw data acts weirdly)
   const recentHistory = pricing.priceHistory.slice(-5);
-  const sum = recentHistory.reduce((acc, entry) => acc + entry.price, 0);
+  const sum = recentHistory.reduce((acc, entry) => acc.plus(new Decimal(entry.price)), new Decimal(0));
   
-  return sum / recentHistory.length;
+  return sum.dividedBy(recentHistory.length);
 }
 
 /**
@@ -60,23 +61,25 @@ export function calculateMovingAverage(pricing: ProductPricing): number {
  * detect if the restaurant is overpaying for the specified SKU.
  * 
  * @param pricing Record containing the price history and contract baseline.
- * @returns A breakdown of the moving average, contract price, and variance.
+ * @returns A breakdown of the moving average, contract price, and variance as exact strings.
  */
 export function evaluatePricing(pricing: ProductPricing) {
   const movingAverage = calculateMovingAverage(pricing);
-  const contractPrice = pricing.contractPrice;
+  const contractPrice = new Decimal(pricing.contractPrice || 0);
   
-  const variance = movingAverage - contractPrice;
-  const variancePercentage = contractPrice > 0 ? (variance / contractPrice) * 100 : 0;
+  const variance = movingAverage.minus(contractPrice);
+  const variancePercentage = contractPrice.gt(0)
+    ? variance.dividedBy(contractPrice).times(100)
+    : new Decimal(0);
 
   return {
     vendorId: pricing.vendorId,
     productSku: pricing.productSku,
-    movingAverage,
-    contractPriceBaseline: contractPrice,
-    variance: Number(variance.toFixed(2)),
-    variancePercentage: Number(variancePercentage.toFixed(2)),
-    isOverpaying: variancePercentage > 0,
+    movingAverage: movingAverage.toFixed(2),
+    contractPriceBaseline: contractPrice.toFixed(2),
+    variance: variance.toFixed(2),
+    variancePercentage: variancePercentage.toFixed(2),
+    isOverpaying: variancePercentage.gt(0),
   };
 }
 
@@ -84,8 +87,9 @@ export function evaluatePricing(pricing: ProductPricing) {
  * Utility to append a new price to the history array, ensuring it never 
  * exceeds the 5-item rolling window size constraint.
  */
-export function appendNewPrice(pricing: ProductPricing, newPrice: number, date: string = new Date().toISOString()): ProductPricing {
-  const newEntry: PriceEntry = { price: newPrice, date };
+export function appendNewPrice(pricing: ProductPricing, newPrice: number | string | Decimal, date: string = new Date().toISOString()): ProductPricing {
+  const exactPriceString = new Decimal(newPrice).toString();
+  const newEntry: PriceEntry = { price: exactPriceString, date };
   
   let updatedHistory = [...pricing.priceHistory, newEntry];
   if (updatedHistory.length > 5) {

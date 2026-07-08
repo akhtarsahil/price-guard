@@ -1,12 +1,14 @@
-import { ProductPricing, calculateMovingAverage, PriceEntry } from "./pricing";
+import Decimal from "decimal.js";
+import { ProductPricing, calculateMovingAverage } from "./pricing";
 import { IPricingRepository, IAuditLogRepository, AuditLogEntry } from "./interfaces";
 
 export interface InvoiceItem {
-  vendorId: string;
-  productSku: string;
+  vendorId?: string;
+  productSku?: string;
+  itemNameOrSku?: string;
   quantity: number;
-  unitPrice: number;
-  totalAmount: number;
+  unitPrice: number | string;
+  totalAmount: number | string;
 }
 
 export interface ComparisonFlag {
@@ -15,184 +17,220 @@ export interface ComparisonFlag {
 }
 
 export interface ComparisonResult {
-  vendorId: string;
+  itemNameOrSku?: string;
+  quantity?: number;
+  billedUnitPrice?: string | number;
+  contractPrice: string | number | null;
+  movingAveragePrice?: string | number | null;
+  variancePercentage: string | number;
+  overchargeAmount?: string | number;
+  flagType?: "PRICE_HIKE" | "CONTRACT_VIOLATION" | null;
+  thresholdApplied?: string;
+  // Legacy accessors
+  vendorId?: string;
   productSku: string;
-  oldMovingAverage: number;
-  contractPrice: number;
-  newUnitPrice: number;
-  variancePercentage: number;
-  leakage: number; // The extra cost paid due to the price hike
+  newUnitPrice: number | string;
+  oldMovingAverage: number | string;
+  leakage: number | string;
   flags: ComparisonFlag[];
 }
 
 export interface IngestionSummary {
   totalItemsProcessed: number;
-  totalLeakage: number;
+  totalLeakage: string;
   flaggedItems: ComparisonResult[];
   auditEntriesLogged: number;
 }
 
-/**
- * Compares a single newly ingested invoice item against the store's historical pricing.
- * 
- * @param item The newly ingested item details.
- * @param historicalData The existing pricing data from the database.
- * @param priceHikeThreshold The percentage difference that triggers a PRICE_HIKE flag (default: 5%).
- * @returns A detailed comparison result including flags and leakage amounts.
- */
-export function compareItemPricing(
-  item: InvoiceItem,
-  historicalData: ProductPricing | null,
-  priceHikeThreshold: number = 5
-): ComparisonResult {
-  const result: ComparisonResult = {
-    vendorId: item.vendorId,
-    productSku: item.productSku,
-    oldMovingAverage: 0,
-    contractPrice: 0,
-    newUnitPrice: item.unitPrice,
-    variancePercentage: 0,
-    leakage: 0,
-    flags: [],
-  };
-
-  // If we have no historical data, we can't do a valid comparison yet.
-  if (!historicalData) {
-    return result;
-  }
-
-  result.contractPrice = historicalData.contractPrice;
-  result.oldMovingAverage = calculateMovingAverage(historicalData);
-
-  // 1. Check against the Moving Average for general Price Hikes
-  if (result.oldMovingAverage > 0) {
-    const variance = item.unitPrice - result.oldMovingAverage;
-    result.variancePercentage = (variance / result.oldMovingAverage) * 100;
-
-    if (result.variancePercentage > priceHikeThreshold) {
-      result.flags.push({
-        type: "PRICE_HIKE",
-        message: `Price increased by ${result.variancePercentage.toFixed(2)}% compared to the moving average of $${result.oldMovingAverage.toFixed(2)}.`,
-      });
-      // Leakage is the extra amount paid * quantity
-      result.leakage += variance * item.quantity;
-    }
-  }
-
-  // 2. Check against the strict Contract Price for Violations
-  if (result.contractPrice > 0 && item.unitPrice > result.contractPrice) {
-    const violationVariance = item.unitPrice - result.contractPrice;
-    result.flags.push({
-      type: "CONTRACT_VIOLATION",
-      message: `Unit price of $${item.unitPrice.toFixed(2)} exceeds the contracted baseline of $${result.contractPrice.toFixed(2)}.`,
-    });
-    
-    if (result.contractPrice > 0) {
-       result.leakage = violationVariance * item.quantity;
-    }
-  }
-
+function attachLegacyAccessors(result: any): ComparisonResult {
+  Object.defineProperty(result, "leakage", {
+    get: () => Number(result.overchargeAmount),
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(result, "productSku", {
+    get: () => result.itemNameOrSku,
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(result, "newUnitPrice", {
+    get: () => Number(result.billedUnitPrice),
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(result, "oldMovingAverage", {
+    get: () => Number(result.movingAveragePrice || 0),
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(result, "flags", {
+    get: () => result.flagType ? [{ type: result.flagType, message: result.thresholdApplied }] : [],
+    enumerable: false,
+    configurable: true,
+  });
   return result;
 }
 
-/**
- * Determines the human-readable threshold description for the audit log.
- * Called for every line item — flagged or not.
- */
-function describeThreshold(
-  comparison: ComparisonResult,
-  priceHikeThreshold: number
-): string {
-  const hasContract = comparison.flags.some(f => f.type === "CONTRACT_VIOLATION");
-  const hasPriceHike = comparison.flags.some(f => f.type === "PRICE_HIKE");
+export function compareItemPricing(
+  item: InvoiceItem,
+  pricing: ProductPricing | null,
+  rulesInput?: {
+    contractViolationThresholdPct?: number | string;
+    priceHikeThresholdPct?: number | string;
+  } | number
+): ComparisonResult {
+  const rules = typeof rulesInput === "number"
+    ? { contractViolationThresholdPct: 0, priceHikeThresholdPct: rulesInput }
+    : {
+        contractViolationThresholdPct: rulesInput?.contractViolationThresholdPct ?? 0,
+        priceHikeThresholdPct: rulesInput?.priceHikeThresholdPct ?? 5,
+      };
 
-  if (hasContract) {
-    return `Exceeded contract price (0% tolerance)`;
+  const billedPrice = new Decimal(item.unitPrice);
+  const itemName = item.itemNameOrSku || item.productSku || "";
+
+  if (!pricing) {
+    return attachLegacyAccessors({
+      itemNameOrSku: itemName,
+      quantity: item.quantity,
+      billedUnitPrice: billedPrice.toFixed(2),
+      contractPrice: null,
+      movingAveragePrice: null,
+      variancePercentage: "0.00",
+      overchargeAmount: "0.00",
+      flagType: null,
+      thresholdApplied: "No prior pricing data for reference check.",
+    });
   }
-  if (hasPriceHike) {
-    return `Exceeded ${priceHikeThreshold}% moving avg buffer`;
+
+  const contractPrice = new Decimal(pricing.contractPrice || 0);
+  const movingAvg = calculateMovingAverage(pricing);
+
+  const contractViolationThreshold = new Decimal(rules.contractViolationThresholdPct);
+  const priceHikeThreshold = new Decimal(rules.priceHikeThresholdPct);
+
+  // 1. Contract Price Check
+  if (contractPrice.gt(0)) {
+    const variance = billedPrice.minus(contractPrice);
+    const variancePct = variance.dividedBy(contractPrice).times(100);
+    const overcharge = variance.times(item.quantity);
+
+    if (variancePct.gt(contractViolationThreshold)) {
+      return attachLegacyAccessors({
+        itemNameOrSku: itemName,
+        quantity: item.quantity,
+        billedUnitPrice: billedPrice.toFixed(2),
+        contractPrice: contractPrice.toFixed(2),
+        movingAveragePrice: movingAvg.gt(0) ? movingAvg.toFixed(2) : null,
+        variancePercentage: variancePct.toFixed(2),
+        overchargeAmount: overcharge.toFixed(2),
+        flagType: "CONTRACT_VIOLATION",
+        thresholdApplied: `Billed price $${billedPrice.toFixed(2)} exceeds contract price $${contractPrice.toFixed(2)} by ${variancePct.toFixed(1)}% (Threshold: ${contractViolationThreshold.toFixed(1)}%)`,
+      });
+    }
   }
-  return "PASS";
+
+  // 2. Moving Average Price Check
+  if (movingAvg.gt(0)) {
+    const variance = billedPrice.minus(movingAvg);
+    const variancePct = variance.dividedBy(movingAvg).times(100);
+    const overcharge = variance.times(item.quantity);
+
+    if (variancePct.gt(priceHikeThreshold)) {
+      return attachLegacyAccessors({
+        itemNameOrSku: itemName,
+        quantity: item.quantity,
+        billedUnitPrice: billedPrice.toFixed(2),
+        contractPrice: contractPrice.gt(0) ? contractPrice.toFixed(2) : null,
+        movingAveragePrice: movingAvg.toFixed(2),
+        variancePercentage: variancePct.toFixed(2),
+        overchargeAmount: overcharge.toFixed(2),
+        flagType: "PRICE_HIKE",
+        thresholdApplied: `Billed price $${billedPrice.toFixed(2)} exceeds moving average $${movingAvg.toFixed(2)} by ${variancePct.toFixed(1)}% (Threshold: ${priceHikeThreshold.toFixed(1)}%)`,
+      });
+    }
+  }
+
+  return attachLegacyAccessors({
+    itemNameOrSku: itemName,
+    quantity: item.quantity,
+    billedUnitPrice: billedPrice.toFixed(2),
+    contractPrice: contractPrice.gt(0) ? contractPrice.toFixed(2) : null,
+    movingAveragePrice: movingAvg.gt(0) ? movingAvg.toFixed(2) : null,
+    variancePercentage: "0.00",
+    overchargeAmount: "0.00",
+    flagType: null,
+    thresholdApplied: "Pricing complies with both fixed contract and historical moving average thresholds.",
+  });
 }
 
-/**
- * Processes an entire list of new invoice items, comparing them against the database,
- * and generates a comprehensive summary of leakage and flags.
- * 
- * Every line item — flagged or not — is logged to the audit trail for full compliance.
- * 
- * @param invoiceItems The list of items extracted from a new invoice.
- * @param pricingRepo The repository used to fetch pricing history.
- * @param priceHikeThreshold Configuration for the price hike alert threshold.
- * @param auditLogRepo Optional audit log repository for compliance trail.
- * @param invoiceId Optional invoice ID for linking audit entries.
- * @returns A summary object detailing total leakage and all flagged results.
- */
 export async function processInvoiceIngestion(
   invoiceItems: InvoiceItem[],
   pricingRepo: IPricingRepository,
-  priceHikeThreshold: number = 5,
+  rulesInput?: {
+    contractViolationThresholdPct?: number | string;
+    priceHikeThresholdPct?: number | string;
+  } | number,
   auditLogRepo?: IAuditLogRepository,
   invoiceId?: string
 ): Promise<IngestionSummary> {
   const summary: IngestionSummary = {
     totalItemsProcessed: invoiceItems.length,
-    totalLeakage: 0,
+    totalLeakage: "0.00",
     flaggedItems: [],
     auditEntriesLogged: 0,
   };
 
+  let totalLeakageDec = new Decimal(0);
+
   for (let i = 0; i < invoiceItems.length; i++) {
     const item = invoiceItems[i];
-    const historicalData = await pricingRepo.getHistoricalPricing(item.vendorId, item.productSku);
-    const comparison = compareItemPricing(item, historicalData, priceHikeThreshold);
+    const historicalData = await pricingRepo.getHistoricalPricing(
+      item.vendorId || "",
+      item.productSku || item.itemNameOrSku || ""
+    );
+    const comparison = compareItemPricing(item, historicalData, rulesInput);
 
-    if (comparison.flags.length > 0) {
+    if (comparison.flagType !== null) {
       summary.flaggedItems.push(comparison);
-      summary.totalLeakage += comparison.leakage;
+      totalLeakageDec = totalLeakageDec.plus(comparison.overchargeAmount ?? 0);
     }
 
-    // Log EVERY line item to the audit trail (flagged or not)
+    // Log line item to the audit trail
     if (auditLogRepo && invoiceId) {
       const referenceType: "contract" | "moving_avg" | "none" =
-        comparison.contractPrice > 0 ? "contract"
-        : comparison.oldMovingAverage > 0 ? "moving_avg"
+        comparison.flagType === "CONTRACT_VIOLATION" ? "contract"
+        : comparison.flagType === "PRICE_HIKE" ? "moving_avg"
+        : comparison.contractPrice ? "contract"
+        : comparison.movingAveragePrice ? "moving_avg"
         : "none";
 
       const referencePrice =
-        referenceType === "contract" ? comparison.contractPrice
-        : referenceType === "moving_avg" ? comparison.oldMovingAverage
-        : 0;
+        referenceType === "contract" ? (comparison.contractPrice || "0.00")
+        : referenceType === "moving_avg" ? (comparison.movingAveragePrice || "0.00")
+        : "0.00";
 
       const entry: AuditLogEntry = {
         id: `audit-${invoiceId}-${i}-${Date.now()}`,
         invoiceId,
         lineItemIndex: i,
-        vendorId: item.vendorId,
-        itemSku: item.productSku,
-        billedPrice: item.unitPrice,
+        vendorId: item.vendorId || "",
+        itemSku: item.productSku || item.itemNameOrSku || "",
+        billedPrice: comparison.billedUnitPrice ?? 0,
         referencePrice,
         referenceType,
-        variancePct: Number(comparison.variancePercentage.toFixed(4)),
-        overcharge: Number(comparison.leakage.toFixed(2)),
-        flagType: comparison.flags.length > 0
-          ? comparison.flags.map(f => f.type).join(", ")
-          : null,
-        thresholdApplied: describeThreshold(comparison, priceHikeThreshold),
+        variancePct: comparison.variancePercentage,
+        overcharge: comparison.overchargeAmount ?? 0,
+        flagType: comparison.flagType ?? null,
+        thresholdApplied: comparison.thresholdApplied ?? "",
         loggedAt: new Date().toISOString(),
       };
 
       await auditLogRepo.logEntry(entry);
       summary.auditEntriesLogged++;
     }
-
-    // After analysis is complete, we append the new price to the history
-    await pricingRepo.appendPrice(item.vendorId, item.productSku, item.unitPrice);
   }
 
-  // Ensure total leakage is nicely formatted to 2 decimals rounded
-  summary.totalLeakage = Number(summary.totalLeakage.toFixed(2));
-
+  summary.totalLeakage = totalLeakageDec.toFixed(2);
   return summary;
 }
-

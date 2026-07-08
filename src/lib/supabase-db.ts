@@ -131,14 +131,14 @@ export class SupabasePricingRepository extends SupabaseDatabase implements IPric
     };
   }
 
-  async appendPrice(vendorId: string, productSku: string, price: number, date: string = new Date().toISOString()): Promise<void> {
+  async appendPrice(vendorId: string, productSku: string, price: number | string, date: string = new Date().toISOString()): Promise<void> {
     if (!this.supabase) return;
 
     // Fetch existing
     const existing = await this.getHistoricalPricing(vendorId, productSku);
     
     let updatedHistory = existing?.priceHistory || [];
-    updatedHistory.push({ price, date });
+    updatedHistory.push({ price: String(price), date });
     
     if (updatedHistory.length > 5) {
       updatedHistory = updatedHistory.slice(-5);
@@ -182,6 +182,21 @@ export class SupabasePricingRepository extends SupabaseDatabase implements IPric
 
 export class SupabaseCreditMemoRepository extends SupabaseDatabase implements ICreditMemoRepository {
   
+  /**
+   * Supabase Schema Definition for credit_memos:
+   * create table credit_memos (
+   *   id text primary key,
+   *   vendor_id text,
+   *   vendor_name text not null,
+   *   vendor_email text,
+   *   invoice_number text not null,
+   *   flagged_items jsonb not null default '[]'::jsonb,
+   *   status text not null default 'DRAFT',
+   *   created_at text not null,
+   *   compiled_email_body text,
+   *   resolution_reason text
+   * );
+   */
   // Helper to map DB snake_case back to CamelCase interface
   private mapToMemo(dbRecord: any): PendingCreditMemo {
     return {
@@ -193,7 +208,8 @@ export class SupabaseCreditMemoRepository extends SupabaseDatabase implements IC
       flaggedItems: dbRecord.flagged_items,
       status: dbRecord.status,
       createdAt: dbRecord.created_at,
-      compiledEmailBody: dbRecord.compiled_email_body
+      compiledEmailBody: dbRecord.compiled_email_body,
+      resolutionReason: dbRecord.resolution_reason
     };
   }
 
@@ -235,13 +251,16 @@ export class SupabaseCreditMemoRepository extends SupabaseDatabase implements IC
       flagged_items: memo.flaggedItems,
       status: memo.status,
       created_at: memo.createdAt,
-      compiled_email_body: memo.compiledEmailBody
+      compiled_email_body: memo.compiledEmailBody,
+      resolution_reason: memo.resolutionReason || null
     });
   }
 
-  async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED"): Promise<void> {
+  async updateMemoStatus(id: string, status: "APPROVED" | "SENT" | "DISMISSED", reason?: string): Promise<void> {
     if (!this.supabase) return;
-    await this.supabase.from('credit_memos').update({ status }).eq('id', id);
+    const payload: any = { status };
+    if (reason) payload.resolution_reason = reason;
+    await this.supabase.from('credit_memos').update(payload).eq('id', id);
   }
 
   async getAllMemos(): Promise<PendingCreditMemo[]> {

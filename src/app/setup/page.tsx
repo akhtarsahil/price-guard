@@ -9,8 +9,8 @@ interface ServiceStatus {
   envFileExists: boolean;
 }
 
-type Step = "welcome" | "openai" | "resend" | "supabase" | "review";
-const STEPS: Step[] = ["welcome", "openai", "resend", "supabase", "review"];
+type Step = "welcome" | "openai" | "resend" | "supabase" | "manual" | "review";
+const STEPS: Step[] = ["welcome", "openai", "resend", "supabase", "manual", "review"];
 
 export default function SetupPage() {
   const [currentStep, setCurrentStep] = useState<Step>("welcome");
@@ -34,6 +34,23 @@ export default function SetupPage() {
   const [thresholdLoading, setThresholdLoading] = useState(true);
   const [thresholdSaving, setThresholdSaving] = useState(false);
   const [thresholdResult, setThresholdResult] = useState<{ success: boolean; message: string } | null>(null);
+  
+  // Manual Data Entry state
+  const [vendors, setVendors] = useState<{ id: string, name: string, email: string }[]>([]);
+  const [newVendorName, setNewVendorName] = useState("");
+  const [newVendorEmail, setNewVendorEmail] = useState("");
+  const [selectedVendorId, setSelectedVendorId] = useState("");
+  const [newProductSku, setNewProductSku] = useState("");
+  const [newProductPrice, setNewProductPrice] = useState("");
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualResult, setManualResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const fetchVendors = () => {
+    fetch("/api/vendors")
+      .then((res) => res.json())
+      .then((data) => setVendors(data.vendors || []))
+      .catch(() => {});
+  };
 
   useEffect(() => {
     fetch("/api/setup")
@@ -49,6 +66,8 @@ export default function SetupPage() {
       })
       .catch(() => {})
       .finally(() => setThresholdLoading(false));
+
+    fetchVendors();
   }, []);
 
   const stepIndex = STEPS.indexOf(currentStep);
@@ -101,6 +120,61 @@ export default function SetupPage() {
 
   const toggleShowKey = (key: string) => setShowKeys((prev) => ({ ...prev, [key]: !prev[key] }));
 
+  const handleAddVendor = async () => {
+    if (!newVendorName) return;
+    setManualSaving(true);
+    setManualResult(null);
+    try {
+      const res = await fetch("/api/vendors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newVendorName, email: newVendorEmail }),
+      });
+      if (res.ok) {
+        setManualResult({ success: true, message: "Vendor added successfully." });
+        setNewVendorName("");
+        setNewVendorEmail("");
+        fetchVendors();
+      } else {
+        const data = await res.json();
+        setManualResult({ success: false, message: data.error || "Failed to add vendor" });
+      }
+    } catch {
+      setManualResult({ success: false, message: "Network error" });
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
+  const handleAddProduct = async () => {
+    if (!selectedVendorId || !newProductSku || !newProductPrice) return;
+    setManualSaving(true);
+    setManualResult(null);
+    try {
+      const res = await fetch("/api/vendors/pricing", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          vendorId: selectedVendorId, 
+          productSku: newProductSku, 
+          contractPrice: parseFloat(newProductPrice) 
+        }),
+      });
+      if (res.ok) {
+        setManualResult({ success: true, message: "Product added successfully." });
+        setNewProductSku("");
+        setNewProductPrice("");
+      } else {
+        const data = await res.json();
+        setManualResult({ success: false, message: data.error || "Failed to add product" });
+      }
+    } catch {
+      setManualResult({ success: false, message: "Network error" });
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
   const configuredCount = [openaiKey, resendKey, supabaseUrl && supabaseKey].filter(Boolean).length;
 
   // Generate .env.local preview
@@ -122,7 +196,7 @@ export default function SetupPage() {
     <main className="min-h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-100 font-sans">
       {/* Gradient Header */}
       <div className="bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 px-8 py-12 md:py-16">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-3xl mx-auto">
           <a href="/" className="text-white/70 hover:text-white text-sm font-medium mb-4 inline-block transition-colors">← Back to Dashboard</a>
           <h1 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight">
             Setup Wizard
@@ -134,41 +208,46 @@ export default function SetupPage() {
       </div>
 
       {/* Progress Bar */}
-      <div className="max-w-2xl mx-auto px-8 -mt-4">
-        <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 shadow-lg">
-          <div className="flex items-center justify-between mb-2">
-            {STEPS.map((step, i) => (
-              <div key={step} className="flex items-center">
-                <button
-                  onClick={() => setCurrentStep(step)}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                    i <= stepIndex
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/30"
-                      : "bg-zinc-200 dark:bg-zinc-700 text-zinc-500"
-                  }`}
-                >
-                  {i + 1}
-                </button>
-                {i < STEPS.length - 1 && (
-                  <div className={`w-12 md:w-20 h-0.5 mx-1 transition-colors ${
-                    i < stepIndex ? "bg-indigo-500" : "bg-zinc-200 dark:bg-zinc-700"
-                  }`} />
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="flex justify-between text-[10px] md:text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-            <span>Welcome</span>
-            <span>OCR</span>
-            <span>Email</span>
-            <span>Database</span>
-            <span>Review</span>
+      <div className="max-w-3xl mx-auto px-8 -mt-4">
+        <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 px-6 shadow-lg">
+          <div className="flex items-start">
+            {STEPS.map((step, i) => {
+              const labels = ["Welcome", "OCR", "Email", "Database", "Data Entry", "Review"];
+              return (
+                <div key={step} className="contents">
+                  {/* Step column: circle + label */}
+                  <div className="flex flex-col items-center" style={{ width: 56 }}>
+                    <button
+                      onClick={() => setCurrentStep(step)}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                        i <= stepIndex
+                          ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/30"
+                          : "bg-zinc-200 dark:bg-zinc-700 text-zinc-500"
+                      }`}
+                    >
+                      {i + 1}
+                    </button>
+                    <span className="mt-1.5 text-[10px] md:text-xs text-zinc-500 dark:text-zinc-400 font-medium whitespace-nowrap">
+                      {labels[i]}
+                    </span>
+                  </div>
+                  {/* Connector between steps */}
+                  {i < STEPS.length - 1 && (
+                    <div className="flex-1 flex items-center pt-[14px]">
+                      <div className={`w-full h-0.5 transition-colors ${
+                        i < stepIndex ? "bg-indigo-500" : "bg-zinc-200 dark:bg-zinc-700"
+                      }`} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
 
       {/* Step Content */}
-      <div className="max-w-2xl mx-auto px-8 py-8">
+      <div className="max-w-3xl mx-auto px-8 py-8">
         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 md:p-8 shadow-sm min-h-[320px] flex flex-col">
 
           {/* WELCOME */}
@@ -346,6 +425,115 @@ export default function SetupPage() {
                 </div>
               )}
               <div className="mt-auto flex justify-between">
+                <button onClick={goBack} className="px-5 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-colors">
+                  ← Back
+                </button>
+                <button onClick={goNext} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm">
+                  Manual Entry →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* MANUAL ENTRY */}
+          {currentStep === "manual" && (
+            <div className="flex-1 flex flex-col">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-2xl">📝</span>
+                <div>
+                  <h2 className="text-xl font-bold">Manual Data Entry</h2>
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400">Add vendors and contract prices manually</p>
+                </div>
+              </div>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-6 leading-relaxed">
+                Speed up the app by seeding it with your existing data. If you skip this, 
+                data will be created automatically as you upload invoices.
+              </p>
+
+              <div className="space-y-6">
+                {/* Add Vendor */}
+                <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl">
+                  <h3 className="text-sm font-bold mb-3">Add New Vendor</h3>
+                  <div className="space-y-3">
+                    <div className="flex flex-col md:flex-row gap-3">
+                      <input
+                        type="text"
+                        placeholder="Vendor Name"
+                        value={newVendorName}
+                        onChange={(e) => setNewVendorName(e.target.value)}
+                        className="flex-1 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                      />
+                      <input
+                        type="email"
+                        placeholder="Vendor Email"
+                        value={newVendorEmail}
+                        onChange={(e) => setNewVendorEmail(e.target.value)}
+                        className="flex-1 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                      />
+                    </div>
+                    <button
+                      onClick={handleAddVendor}
+                      disabled={manualSaving || !newVendorName}
+                      className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+                    >
+                      + Add Vendor
+                    </button>
+                  </div>
+                </div>
+
+                {/* Add Product */}
+                <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl">
+                  <h3 className="text-sm font-bold mb-3">Add Contract Price</h3>
+                  <div className="space-y-3">
+                    <select
+                      value={selectedVendorId}
+                      onChange={(e) => setSelectedVendorId(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                    >
+                      <option value="">Select a Vendor</option>
+                      {vendors.map((v) => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </select>
+                    <div className="flex flex-col md:flex-row gap-3">
+                      <input
+                        type="text"
+                        placeholder="Product SKU (e.g. BEEF-RIBEYE)"
+                        value={newProductSku}
+                        onChange={(e) => setNewProductSku(e.target.value)}
+                        className="flex-1 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                      />
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="$ Price"
+                        value={newProductPrice}
+                        onChange={(e) => setNewProductPrice(e.target.value)}
+                        className="w-28 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                      />
+                    </div>
+                    <button
+                      onClick={handleAddProduct}
+                      disabled={manualSaving || !selectedVendorId || !newProductSku || !newProductPrice}
+                      className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+                    >
+                      + Set Price
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {manualResult && (
+                <div className={`mt-4 px-4 py-3 rounded-lg text-sm border ${
+                  manualResult.success
+                    ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
+                    : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+                }`}>
+                  {manualResult.success ? "✅ " : "❌ "}{manualResult.message}
+                </div>
+              )}
+
+              <div className="mt-auto pt-6 flex justify-between">
                 <button onClick={goBack} className="px-5 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium transition-colors">
                   ← Back
                 </button>
