@@ -15,11 +15,8 @@ import { AntigravityOCRClient } from "./ocr";
 // Service Layer — Dependency Injection Container
 // 
 // Priority:
-//  1. Supabase (cloud) — if SUPABASE env vars are present
-//  2. SQLite (local)   — default, zero-config
-//
-// The app works out of the box with SQLite. No accounts or
-// API keys are needed. Supabase is an optional cloud upgrade.
+//  1. Supabase (cloud) — active when SUPABASE env vars are present
+//  2. In-Memory / File-system — serverless fallback
 // -------------------------------------------------------------
 
 const hasSupabase = !!(
@@ -53,25 +50,25 @@ function createRepos() {
     };
   }
 
-  // Default: SQLite (zero-config local persistence)
+  // Fallback: In-Memory / File-system persistence for serverless environments
   const {
-    SQLiteVendorRepository,
-    SQLiteInvoiceRepository,
-    SQLitePricingRepository,
-    SQLiteCreditMemoRepository,
-    SQLiteAuditLogRepository,
-    SQLiteSettingsRepository,
-    SQLitePasswordRepository,
-  } = require("./sqlite-db");
+    InMemoryVendorRepository,
+    InMemoryInvoiceRepository,
+    InMemoryPricingRepository,
+    InMemoryCreditMemoRepository,
+    InMemoryAuditLogRepository,
+    InMemorySettingsRepository,
+    InMemoryPasswordRepository,
+  } = require("./in-memory-db");
 
   return {
-    vendorRepo: new SQLiteVendorRepository() as IVendorRepository,
-    invoiceRepo: new SQLiteInvoiceRepository() as IInvoiceRepository,
-    pricingRepo: new SQLitePricingRepository() as IPricingRepository,
-    creditMemoRepo: new SQLiteCreditMemoRepository() as ICreditMemoRepository,
-    auditLogRepo: new SQLiteAuditLogRepository() as IAuditLogRepository,
-    settingsRepo: new SQLiteSettingsRepository() as ISettingsRepository,
-    passwordRepo: new SQLitePasswordRepository() as IPasswordRepository,
+    vendorRepo: new InMemoryVendorRepository() as IVendorRepository,
+    invoiceRepo: new InMemoryInvoiceRepository() as IInvoiceRepository,
+    pricingRepo: new InMemoryPricingRepository() as IPricingRepository,
+    creditMemoRepo: new InMemoryCreditMemoRepository() as ICreditMemoRepository,
+    auditLogRepo: new InMemoryAuditLogRepository() as IAuditLogRepository,
+    settingsRepo: new InMemorySettingsRepository() as ISettingsRepository,
+    passwordRepo: new InMemoryPasswordRepository() as IPasswordRepository,
   };
 }
 
