@@ -60,7 +60,7 @@ export default function Home() {
       <div className="max-w-7xl mx-auto space-y-8">
         <header className="flex flex-col gap-2">
           <a
-            href="https://price-guard-is4e.vercel.app/login"
+            href="https://portfolio-ten-tau-21eny422fr.vercel.app/"
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs font-medium text-zinc-400 dark:text-zinc-500 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors max-w-max"
